@@ -104,7 +104,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -154,7 +153,6 @@ fun HomeScreen() {
     val context = LocalContext.current
     var index by rememberSaveable { mutableIntStateOf(0) }
     var chrome by rememberSaveable { mutableStateOf(true) }
-    var lastExploreTap by remember { mutableLongStateOf(0L) }
     val unread by app.inbox.unreadCount.collectAsStateWithLifecycle()
     val settings by app.settings.state.collectAsStateWithLifecycle()
     val inboxReselect by app.feed.tabReselect(2).collectAsStateWithLifecycle()
@@ -300,14 +298,12 @@ fun HomeScreen() {
     val navHidden = remember { { navOffset.coerceIn(0f, 1f) } }
 
     fun selectTab(i: Int) {
-        // Double-tapping Explore opens search, keyboard up.
-        val now = System.currentTimeMillis()
-        if (i == 1 && now - lastExploreTap < 400) {
-            lastExploreTap = 0L
+        // Tapping Explore while it's already the tab opens search, keyboard up
+        // (so a double-tap from another tab does too).
+        if (i == 1 && index == 1) {
             nav.push(Route.Search())
             return
         }
-        if (i == 1) lastExploreTap = now
         // Re-tapping the active tab scrolls it to top (Posts also refreshes).
         if (i == index) {
             if (i == 0) app.feed.frontpageScrollSignal.value++ else app.feed.tabReselect(i).value++

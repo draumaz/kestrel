@@ -139,7 +139,7 @@ internal fun ExploreTab() {
     var sort by rememberSaveable { mutableStateOf("default") } // default | name | subscribers
     var refreshing by remember { mutableStateOf(false) }
 
-    // Re-tapping the Explore tab scrolls back to top.
+    // Back (with the side bar on) scrolls back to top; re-tapping the tab opens search instead.
     LaunchedEffect(listState) {
         app.feed.tabReselect(1).drop(1).collect { listState.animateScrollToItem(0) }
     }
