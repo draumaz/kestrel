@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Ilay.Starting" parent="Theme.SplashScreen.IconBackground">
+    <style name="Theme.Kestrel.Starting" parent="Theme.SplashScreen.IconBackground">
         <item name="windowSplashScreenBackground">#19171E</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_icon_fg_violet</item>
         <item name="windowSplashScreenIconBackgroundColor">#6E52D6</item>
-        <item name="postSplashScreenTheme">@style/Theme.Ilay</item>
+        <item name="postSplashScreenTheme">@style/Theme.Kestrel</item>
     </style>
-    <style name="Theme.Ilay" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.Kestrel" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowSplashScreenBackground">#19171E</item>
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_icon_fg_violet</item>
         <item name="android:windowSplashScreenIconBackgroundColor">#6E52D6</item>

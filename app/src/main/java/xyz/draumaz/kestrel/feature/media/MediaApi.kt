@@ -1,0 +1,357 @@
+package xyz.draumaz.kestrel.feature.media
+
+import androidx.compose.material3.carousel.CarouselDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.carousel.rememberCarouselState
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material.icons.rounded.Collections
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
+import xyz.draumaz.kestrel.app
+import xyz.draumaz.kestrel.core.isVideoUrl
+import xyz.draumaz.kestrel.core.net.Redgifs
+import xyz.draumaz.kestrel.core.resolveVideoUrl
+import xyz.draumaz.kestrel.feature.feed.FeedMediaBrowser
+import xyz.draumaz.kestrel.feature.feed.feedDecodeWidth
+import xyz.draumaz.kestrel.feature.feed.rememberSizedRequest
+import xyz.draumaz.kestrel.model.GalleryImage
+import xyz.draumaz.kestrel.model.Post
+import xyz.draumaz.kestrel.model.PostType
+import xyz.draumaz.kestrel.nav.AppNavigator
+import xyz.draumaz.kestrel.nav.LocalNavigator
+import xyz.draumaz.kestrel.nav.MediaViewer
+import xyz.draumaz.kestrel.nav.ViewerStack
+
+/**
+ * A video post's playable URL, without any network lookup: Reddit's own
+ * stream when it hosts the video, a direct file link as-is, and otherwise
+ * Reddit's mp4 copy of the embed (e.g. RedGifs), whose own URL is a web page.
+ */
+fun postVideoUrl(p: Post): String {
+    (p.hlsUrl ?: p.fallbackVideoUrl)?.let { return it }
+    val direct = resolveVideoUrl(p.url)
+    val uri = runCatching { Uri.parse(direct) }.getOrNull()
+    if (uri != null && isVideoUrl(uri)) return direct
+    return p.gifMp4Url ?: direct
+}
+
+/**
+ * A video post Kestrel can't play itself — a YouTube / Vimeo / other embed with
+ * no Reddit-hosted copy or direct file. It opens in its own app or the
+ * browser (it used to land on a "can't be played" error screen).
+ */
+fun isExternalVideo(p: Post): Boolean {
+    if (p.type != PostType.VIDEO || p.hlsUrl != null || p.fallbackVideoUrl != null || p.gifMp4Url != null) return false
+    if (Redgifs.id(p.url) != null) return false
+    val u = runCatching { Uri.parse(resolveVideoUrl(p.url)) }.getOrNull() ?: return true
+    return !isVideoUrl(u)
+}
+
+/** Where an external video plays, for its feed label ("YouTube"). */
+fun externalVideoSource(p: Post): String {
+    val d = p.domain.lowercase().removePrefix("www.").removePrefix("m.")
+    return when {
+        d == "youtu.be" || d.endsWith("youtube.com") -> "YouTube"
+        d.endsWith("vimeo.com") -> "Vimeo"
+        d.endsWith("twitch.tv") -> "Twitch"
+        d.endsWith("streamable.com") -> "Streamable"
+        else -> d.ifEmpty { "Video" }
+    }
+}
+
+/**
+ * Opens a video post full-screen. RedGifs clips are resolved to their HD
+ * file (with sound) first, falling back to Reddit's silent mp4 copy.
+ */
+suspend fun openPostVideo(nav: AppNavigator, post: Post) {
+    if (isExternalVideo(post)) {
+        nav.openExternal(post.url)
+        return
+    }
+    var src = postVideoUrl(post)
+    var download = post.fallbackVideoUrl ?: src
+    if (post.hlsUrl == null && post.fallbackVideoUrl == null && Redgifs.id(post.url) != null) {
+        val hd = Redgifs.resolve(post.url)
+        if (hd != null) {
+            src = hd
+            download = hd
+        }
+    }
+    nav.openVideo(src, title = post.title, downloadUrl = download, externalUrl = post.url)
+}
+
+/**
+ * Downloads a media file to the folder picked in Settings, else the device
+ * gallery's "Kestrel" album, with a cancellable progress dialog showing
+ * downloaded / total size.
+ */
+suspend fun saveMediaToGallery(url: String, isVideo: Boolean) = saveMedia(url, isVideo)
+
+/**
+ * A gallery as a Material 3 carousel (#30), for the post screen: a large
+ * image with the next ones peeking beside it, each opening the full-screen
+ * viewer at that image. Feeds use it too unless Settings › Gallery carousel
+ * in feeds is off (then [GalleryCarousel], one image at a time).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GalleryM3Carousel(images: List<GalleryImage>, modifier: Modifier = Modifier, title: String? = null, height: Dp = 300.dp) {
+    if (images.isEmpty()) return
+    val nav = LocalNavigator.current
+    val cs = MaterialTheme.colorScheme
+    val decodeWidth = feedDecodeWidth()
+    val state = rememberCarouselState { images.size }
+    Column(modifier.fillMaxWidth()) {
+        HorizontalMultiBrowseCarousel(
+            state = state,
+            preferredItemWidth = 280.dp,
+            itemSpacing = 8.dp,
+            // A fling moves several images, not one: long galleries go quicker.
+            flingBehavior = CarouselDefaults.multiBrowseFlingBehavior(state),
+            modifier = Modifier.fillMaxWidth().height(height),
+        ) { i ->
+            var failed by remember { mutableStateOf(false) }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .maskClip(RoundedCornerShape(28.dp))
+                    .background(cs.surfaceContainerHighest)
+                    .clickable { nav.openGallery(images, title, i) },
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = rememberSizedRequest(images[i].url, decodeWidth),
+                    contentDescription = "Image ${i + 1} of ${images.size}",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { failed = true },
+                )
+                if (failed) Icon(Icons.Outlined.BrokenImage, null, tint = cs.onSurfaceVariant)
+            }
+        }
+        Row(Modifier.padding(start = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Rounded.Collections, null, Modifier.size(14.dp), tint = cs.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            Text("${images.size} images · tap one to view", fontSize = 12.sp, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+/**
+ * An inline, swipeable gallery preview with a page counter and dot indicator.
+ * Tapping any image opens the full-screen viewer at that index. With
+ * [height] it's a fixed-height (cover-cropped) banner instead of sizing to
+ * the first image's aspect ratio.
+ */
+@Composable
+fun GalleryCarousel(images: List<GalleryImage>, modifier: Modifier = Modifier, title: String? = null, height: Dp? = null) {
+    if (images.isEmpty()) return
+    val nav = LocalNavigator.current
+    val cs = MaterialTheme.colorScheme
+    val first = images.first()
+    val aspect = if (first.width != null && first.height != null && first.height > 0) {
+        (first.width.toFloat() / first.height).coerceIn(0.5f, 2f)
+    } else 16f / 9f
+    val pager = rememberPagerState { images.size }
+    val decodeWidth = feedDecodeWidth()
+    val sized = if (height != null) modifier.fillMaxWidth().height(height) else modifier.fillMaxWidth().aspectRatio(aspect)
+    Box(sized.clip(RoundedCornerShape(16.dp))) {
+        HorizontalPager(pager, Modifier.fillMaxSize(), key = { it }) { i ->
+            var failed by remember { mutableStateOf(false) }
+            Box(
+                Modifier.fillMaxSize().background(cs.surfaceContainerHighest).clickable { nav.openGallery(images, title, i) },
+                contentAlignment = Alignment.Center,
+            ) {
+                // Gallery images are full size (often 12MP photos): decode at
+                // screen width, the same request the feed's prefetcher warms.
+                // AsyncImage, not SubcomposeAsyncImage: subcomposition is slow in a scrolling list.
+                AsyncImage(
+                    model = rememberSizedRequest(images[i].url, decodeWidth),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    onError = { failed = true },
+                )
+                if (failed) Icon(Icons.Outlined.BrokenImage, null, tint = cs.onSurfaceVariant)
+            }
+        }
+        // Counter badge
+        Row(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .background(Color.Black.copy(alpha = 0.54f), RoundedCornerShape(10.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Collections, null, Modifier.size(14.dp), tint = Color.White)
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "${pager.currentPage + 1}/${images.size}",
+                color = Color.White,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        // Dot indicator
+        if (images.size > 1) {
+            Row(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                for (i in images.indices) {
+                    Box(
+                        Modifier
+                            .padding(horizontal = 2.dp)
+                            .size(6.dp)
+                            .background(if (i == pager.currentPage) Color.White else Color.White.copy(alpha = 0.54f), CircleShape),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Wraps media with a frosted blur + "NSFW" label until tapped to reveal.
+ * When [blur] is false it renders [content] unchanged.
+ *
+ * Given Reddit's pre-blurred copy ([blurredImageUrl]) it just draws that:
+ * a live blur re-renders the media on every frame, which is one of the most
+ * expensive things a scrolling list can do. While covered, inline videos
+ * inside don't autoplay ([LocalMediaCovered]).
+ */
+@Composable
+fun NsfwBlur(blur: Boolean, modifier: Modifier = Modifier, blurredImageUrl: String? = null, label: String = "NSFW", content: @Composable () -> Unit) {
+    // Plain remember (not saveable): like Flutter, an item scrolled away and
+    // back is blurred again.
+    var revealed by remember { mutableStateOf(false) }
+    if (!blur || revealed) {
+        Box(modifier) { content() }
+        return
+    }
+    Box(modifier) {
+        CompositionLocalProvider(LocalMediaCovered provides true) {
+            // Without a pre-blurred copy, blur the media itself (RenderEffect).
+            Box(if (blurredImageUrl == null) Modifier.blur(24.dp) else Modifier) { content() }
+        }
+        Box(Modifier.matchParentSize().clip(RoundedCornerShape(16.dp))) {
+            if (blurredImageUrl != null) {
+                SubcomposeAsyncImage(
+                    model = blurredImageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                    loading = { Box(Modifier.fillMaxSize().background(Color.Black)) },
+                    error = { Box(Modifier.fillMaxSize().background(Color.Black)) },
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.25f))
+                    .clickable { revealed = true },
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Icon(Icons.Rounded.VisibilityOff, null, Modifier.size(32.dp), tint = Color.White)
+                Spacer(Modifier.height(8.dp))
+                Text("$label · tap to view", color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+/** Feed video: autoplays (muted unless Autoplay with sound) + looping while visible, pauses off-screen; tap = viewer. */
+@Composable
+fun InlineVideo(url: String, height: Dp, onTap: () -> Unit, modifier: Modifier = Modifier, poster: String? = null) =
+    InlineVideoImpl(url, height, onTap, modifier, poster)
+
+/**
+ * The open media viewers, drawn over the current screen with a transparent
+ * background (the Flutter build pushed them as a non-opaque route), so
+ * swipe-to-dismiss fades to the feed underneath. Fades in over 220ms and out
+ * over 180ms; system back closes the top one.
+ */
+@Composable
+fun MediaViewerHost(stack: ViewerStack) {
+    val nav = LocalNavigator.current
+    val top = stack.entries.lastOrNull { !it.closing }
+    // Re-registered whenever a viewer opens, so it outranks any back handler
+    // the screen beneath added after app start.
+    key(top?.id) { BackHandler(enabled = top != null) { nav.closeViewer() } }
+    // The screen beneath stays composed, so pause its inline clip meanwhile.
+    val covered = stack.entries.isNotEmpty()
+    LaunchedEffect(covered) { app.media.inlinePlayer.setCovered(covered) }
+    for (entry in stack.entries) {
+        key(entry.id) {
+            AnimatedVisibility(
+                visibleState = entry.visibility,
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(180)),
+            ) {
+                // Swallows touches the viewer doesn't use, so they never reach the screen beneath.
+                Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
+                    when (val v = entry.viewer) {
+                        is MediaViewer.Image -> ImageViewer(v.url, v.title)
+                        is MediaViewer.Gallery -> GalleryViewer(v)
+                        is MediaViewer.Video -> VideoViewer(v)
+                        is MediaViewer.Feed -> FeedMediaBrowser(v)
+                    }
+                }
+            }
+            if (entry.closing && entry.visibility.isIdle) {
+                LaunchedEffect(Unit) { stack.entries.remove(entry) }
+            }
+        }
+    }
+}

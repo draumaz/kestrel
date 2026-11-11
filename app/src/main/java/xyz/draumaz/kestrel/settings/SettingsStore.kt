@@ -1,0 +1,294 @@
+package xyz.draumaz.kestrel.settings
+
+import xyz.draumaz.kestrel.core.Analytics
+import xyz.draumaz.kestrel.core.storage.Prefs
+import xyz.draumaz.kestrel.data.PostSort
+import xyz.draumaz.kestrel.data.TopTime
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+
+/** Loads [Settings] from [Prefs] and persists every change (same keys as Flutter). */
+class SettingsStore(private val p: Prefs) {
+    private val _state = MutableStateFlow(load())
+    val state: StateFlow<Settings> = _state
+    val value: Settings get() = _state.value
+
+    private fun load(): Settings {
+        val d = Settings()
+        fun b(k: String, def: Boolean) = p.getBool(k) ?: def
+        fun <E : Enum<E>> idx(values: Array<E>, k: String, def: E): E =
+            p.getInt(k)?.let { values.getOrNull(it) } ?: def
+        return Settings(
+            themeMode = idx(ThemeMode.entries.toTypedArray(), "themeMode", d.themeMode),
+            amoled = b("amoled", d.amoled),
+            useDynamicColor = b("useDynamicColor", d.useDynamicColor),
+            paletteStyle = idx(PaletteStyle.entries.toTypedArray(), "paletteStyle", d.paletteStyle),
+            jakartaFont = b("jakartaFont", d.jakartaFont),
+            // Before the picker there was only the Jakarta switch (Flutter's too):
+            // keep Jakarta for those who chose it; everyone else gets the v2 default.
+            appFont = AppFont.parse(p.getString("appFont"), if (b("jakartaFont", false)) AppFont.JAKARTA else d.appFont),
+            inAppBrowser = b("inAppBrowser", d.inAppBrowser),
+            tapToCollapse = b("tapToCollapse", d.tapToCollapse),
+            collapseRepliesOnly = b("collapseRepliesOnly", d.collapseRepliesOnly),
+            voteEdge = b("voteEdge", d.voteEdge),
+            voteGlow = b("voteGlow", d.voteGlow),
+            commentAvatars = b("commentAvatars", d.commentAvatars),
+            autoTranslate = b("autoTranslate", d.autoTranslate),
+            translateSecondLanguage = p.getString("translateSecondLanguage") ?: d.translateSecondLanguage,
+            translateService = p.getString("translateService") ?: d.translateService,
+            azureRegion = p.getString("azureRegion") ?: d.azureRegion,
+            volumeKeyNavigation = b("volumeKeyNavigation", d.volumeKeyNavigation),
+            collapseBelowScore = p.getInt("collapseBelowScore"),
+            collapseTopLevel = b("collapseTopLevel", d.collapseTopLevel),
+            hideReadPosts = b("hideReadPosts", d.hideReadPosts),
+            hideReadInSubreddits = b("hideReadInSubreddits", d.hideReadInSubreddits),
+            recentSubsByVisits = b("recentSubredditsByVisits", d.recentSubsByVisits),
+            dimReadTextOnly = b("dimReadTextOnly", d.dimReadTextOnly),
+            dimRead = b("dimRead", d.dimRead),
+            subredditIcons = b("subredditIcons", d.subredditIcons),
+            subredditPrefix = b("subredditPrefix", d.subredditPrefix),
+            markReadOnScroll = b("markReadOnScroll", d.markReadOnScroll),
+            swipePostStart = SwipeAction.parse(p.getString("swipePostStart"), SwipeAction.UPVOTE),
+            swipePostEnd = SwipeAction.parse(p.getString("swipePostEnd"), SwipeAction.DOWNVOTE),
+            swipeCommentStart = SwipeAction.parse(p.getString("swipeCommentStart"), SwipeAction.UPVOTE),
+            swipeCommentEnd = SwipeAction.parse(p.getString("swipeCommentEnd"), SwipeAction.DOWNVOTE),
+            seedColor = p.getLong("seedColor")?.and(0xFFFFFFFFL) ?: d.seedColor,
+            customSeedColor = p.getLong("customSeedColor")?.and(0xFFFFFFFFL),
+            blurNsfw = b("blurNsfw", d.blurNsfw),
+            defaultSort = idx(PostSort.entries.toTypedArray(), "defaultSort", d.defaultSort),
+            subredditSorts = p.getStringList("subredditSorts").orEmpty().mapNotNull { row ->
+                val parts = row.split('|')
+                val sort = PostSort.entries.find { it.path == parts.getOrNull(1) }
+                val time = TopTime.entries.find { it.param == parts.getOrNull(2) }
+                if (sort == null || time == null) null else parts[0] to SubredditSort(sort, time)
+            }.toMap(),
+            defaultCommentSort = p.getString("defaultCommentSort") ?: d.defaultCommentSort,
+            postDisplay = idx(PostDisplay.entries.toTypedArray(), "postDisplay", d.postDisplay),
+            commentStyle = idx(CommentStyle.entries.toTypedArray(), "commentStyle", d.commentStyle),
+            swipeActions = b("swipeActions", d.swipeActions),
+            floatingChips = b("floatingChips", d.floatingChips),
+            floatingChipsSolid = b("floatingChipsSolid", d.floatingChipsSolid),
+            fullBarNewPost = b("fullBarNewPost", d.fullBarNewPost),
+            trackHistory = b("trackHistory", d.trackHistory),
+            showRecentlyVisited = b("showRecentlyVisited", d.showRecentlyVisited),
+            offlineCache = b("offlineCache", d.offlineCache),
+            checkUpdates = b("checkUpdates", d.checkUpdates),
+            analytics = b("analytics", d.analytics),
+            forYouFeed = b("forYouFeed", d.forYouFeed),
+            postsTabAll = b("postsTabAll", d.postsTabAll),
+            redditHomeAllowed = b("redditHomeAllowed", d.redditHomeAllowed),
+            redditHomeFeed = b("redditHomeFeed", d.redditHomeFeed),
+            autoHideReadForYou = b("autoHideReadForYou", d.autoHideReadForYou),
+            blendHome = b("blendHome", d.blendHome),
+            blendReddit = (p.getInt("blendReddit") ?: d.blendReddit).coerceIn(0, 2),
+            forYouDiscovery = (p.getInt("forYouDiscovery") ?: d.forYouDiscovery).coerceIn(-2, 2),
+            midResThumbnails = b("midResThumbnails", d.midResThumbnails),
+            subsCacheEnabled = b("subsCacheEnabled", d.subsCacheEnabled),
+            subsCacheMinutes = p.getInt("subsCacheMinutes") ?: d.subsCacheMinutes,
+            imageCacheMb = p.getInt("imageCacheMb") ?: d.imageCacheMb,
+            videoCacheMb = p.getInt("videoCacheMb") ?: d.videoCacheMb,
+            feedKeepMinutes = p.getInt("feedKeepMinutes") ?: d.feedKeepMinutes,
+            hiddenPostDays = p.getInt("hiddenPostDays") ?: d.hiddenPostDays,
+            textScale = p.getDouble("textScale") ?: d.textScale,
+            autoplayMedia = b("autoplayMedia", d.autoplayMedia),
+            autoplaySound = b("autoplaySound", d.autoplaySound),
+            viewerMuted = b("viewerMuted", d.viewerMuted),
+            feedGalleryCarousel = b("feedGalleryCarousel", d.feedGalleryCarousel),
+            showApiUsage = b("showApiUsage", d.showApiUsage),
+            notifyInbox = b("notifyInbox", d.notifyInbox),
+            redditAppNotifications = b("redditAppNotifications", d.redditAppNotifications),
+            // Old installs may have stored the removed "compact" (1) or the old
+            // expandable index (2); clamping maps both safely.
+            homeFab = idx(HomeFab.entries.toTypedArray(), "homeFab", d.homeFab),
+            threadFab = idx(ThreadFab.entries.toTypedArray(), "threadFab", d.threadFab),
+            threadFabPosition = idx(ThreadFabPosition.entries.toTypedArray(), "threadFabPosition", d.threadFabPosition),
+            threadJumpOp = b("threadJumpOp", d.threadJumpOp),
+            threadJumpMine = b("threadJumpMine", d.threadJumpMine),
+            threadJumpNext = b("threadJumpNext", d.threadJumpNext),
+            topBarMode = p.getInt("topBarMode")?.let {
+                TopBarMode.entries[it.coerceIn(0, TopBarMode.entries.size - 1)]
+            } ?: d.topBarMode,
+            topBarMenuExpandable = TopBarMenuItem.parse(p.getStringList(TopBarMenuItem.prefsKey(TopBarMode.EXPANDABLE)), TopBarMode.EXPANDABLE),
+            topBarMenuFull = TopBarMenuItem.parse(p.getStringList(TopBarMenuItem.prefsKey(TopBarMode.FULL)), TopBarMode.FULL),
+            navLabels = b("navLabels", d.navLabels),
+            navStyle = (p.getInt("navStyle") ?: d.navStyle).coerceIn(0, 2),
+            sideBarItems = SideBarItem.parse(p.getStringList(SideBarItem.PREFS_KEY)),
+            navOutline = b("navOutline", d.navOutline),
+            buttonHaptics = b("buttonHaptics", d.buttonHaptics),
+            backScrollsToTop = b("backScrollsToTop", d.backScrollsToTop),
+            aiModel = p.getString("aiModel") ?: d.aiModel,
+            aiSummaryStyle = p.getInt("aiSummaryStyle") ?: d.aiSummaryStyle,
+            aiSummaryLanguage = p.getString("aiSummaryLanguage") ?: d.aiSummaryLanguage,
+            aiMaxChars = p.getInt("aiMaxChars") ?: d.aiMaxChars,
+            aiUseCustomUrl = b("aiUseCustomUrl", d.aiUseCustomUrl),
+            aiBaseUrl = p.getString("aiBaseUrl") ?: d.aiBaseUrl,
+            appIcon = p.getString("appIcon") ?: d.appIcon,
+        )
+    }
+
+    /** Re-reads everything from prefs (after a backup restore). */
+    fun reload() {
+        _state.value = load()
+    }
+
+    private inline fun set(block: (Settings) -> Settings) = _state.update(block)
+
+    fun setThemeMode(v: ThemeMode) { p.setInt("themeMode", v.ordinal); set { it.copy(themeMode = v) } }
+    fun setAmoled(v: Boolean) { p.setBool("amoled", v); set { it.copy(amoled = v) } }
+    fun setUseDynamicColor(v: Boolean) { p.setBool("useDynamicColor", v); set { it.copy(useDynamicColor = v) } }
+    fun setPaletteStyle(v: PaletteStyle) { p.setInt("paletteStyle", v.ordinal); set { it.copy(paletteStyle = v) } }
+    fun setSeedColor(argb: Long) { p.setLong("seedColor", argb); set { it.copy(seedColor = argb) } }
+    /** A colour from the Custom picker (#84): the accent now, and kept on its swatch. */
+    fun setCustomSeedColor(argb: Long) {
+        p.setLong("customSeedColor", argb)
+        set { it.copy(customSeedColor = argb) }
+        setSeedColor(argb)
+    }
+    fun setBlurNsfw(v: Boolean) { p.setBool("blurNsfw", v); set { it.copy(blurNsfw = v) } }
+    fun setDefaultSort(v: PostSort) { p.setInt("defaultSort", v.ordinal); set { it.copy(defaultSort = v) } }
+    /** [v] null: [name] goes back to following the default sort. */
+    fun setSubredditSort(name: String, v: SubredditSort?) {
+        val key = name.lowercase()
+        val next = if (v == null) value.subredditSorts - key else value.subredditSorts + (key to v)
+        p.setStringList("subredditSorts", next.map { (k, s) -> "$k|${s.sort.path}|${s.time.param}" })
+        set { it.copy(subredditSorts = next) }
+    }
+    fun setDefaultCommentSort(v: String) { p.setString("defaultCommentSort", v); set { it.copy(defaultCommentSort = v) } }
+    fun setPostDisplay(v: PostDisplay) { p.setInt("postDisplay", v.ordinal); set { it.copy(postDisplay = v) } }
+    fun setCommentStyle(v: CommentStyle) { p.setInt("commentStyle", v.ordinal); set { it.copy(commentStyle = v) } }
+    fun setSwipeActions(v: Boolean) { p.setBool("swipeActions", v); set { it.copy(swipeActions = v) } }
+    fun setFloatingChips(v: Boolean) { p.setBool("floatingChips", v); set { it.copy(floatingChips = v) } }
+    fun setFloatingChipsSolid(v: Boolean) { p.setBool("floatingChipsSolid", v); set { it.copy(floatingChipsSolid = v) } }
+    fun setFullBarNewPost(v: Boolean) { p.setBool("fullBarNewPost", v); set { it.copy(fullBarNewPost = v) } }
+    fun setTrackHistory(v: Boolean) { p.setBool("trackHistory", v); set { it.copy(trackHistory = v) } }
+    fun setShowRecentlyVisited(v: Boolean) { p.setBool("showRecentlyVisited", v); set { it.copy(showRecentlyVisited = v) } }
+    fun setOfflineCache(v: Boolean) { p.setBool("offlineCache", v); set { it.copy(offlineCache = v) } }
+    fun setCheckUpdates(v: Boolean) { p.setBool("checkUpdates", v); set { it.copy(checkUpdates = v) } }
+    fun setAnalytics(v: Boolean) { p.setBool("analytics", v); set { it.copy(analytics = v) } }
+    fun setPostsTabAll(v: Boolean) { p.setBool("postsTabAll", v); set { it.copy(postsTabAll = v) } }
+
+    /** Turning Reddit Home off in Settings also takes the frontpage off it. */
+    fun setRedditHomeAllowed(v: Boolean) {
+        // Anonymous: how many opt in to Home after the warning, and turn it off again.
+        if (v != value.redditHomeAllowed) Analytics.track("home_toggled", mapOf("on" to v))
+        p.setBool("redditHomeAllowed", v)
+        set { it.copy(redditHomeAllowed = v) }
+        if (!v) setRedditHomeFeed(false)
+    }
+
+    fun setRedditHomeFeed(v: Boolean) {
+        p.setBool("redditHomeFeed", v)
+        set { it.copy(redditHomeFeed = v) }
+        if (v && value.forYouFeed) {
+            p.setBool("forYouFeed", false)
+            set { it.copy(forYouFeed = false) }
+        }
+    }
+
+    /** One frontpage mode at a time. */
+    fun setForYouFeed(v: Boolean) {
+        p.setBool("forYouFeed", v)
+        set { it.copy(forYouFeed = v) }
+        if (v) setRedditHomeFeed(false)
+    }
+
+    fun setBlendHome(v: Boolean) { p.setBool("blendHome", v); set { it.copy(blendHome = v) } }
+    fun setBlendReddit(v: Int) { p.setInt("blendReddit", v); set { it.copy(blendReddit = v) } }
+    fun setAutoHideReadForYou(v: Boolean) { p.setBool("autoHideReadForYou", v); set { it.copy(autoHideReadForYou = v) } }
+    fun setForYouDiscovery(v: Int) { p.setInt("forYouDiscovery", v); set { it.copy(forYouDiscovery = v) } }
+    fun setAppFont(v: AppFont) {
+        p.setString("appFont", v.key)
+        p.setBool("jakartaFont", v == AppFont.JAKARTA) // keeps backups readable by older builds
+        set { it.copy(appFont = v, jakartaFont = v == AppFont.JAKARTA) }
+    }
+    fun setHideReadPosts(v: Boolean) { p.setBool("hideReadPosts", v); set { it.copy(hideReadPosts = v) } }
+    fun setHideReadInSubreddits(v: Boolean) { p.setBool("hideReadInSubreddits", v); set { it.copy(hideReadInSubreddits = v) } }
+    fun setRecentSubsByVisits(v: Boolean) { p.setBool("recentSubredditsByVisits", v); set { it.copy(recentSubsByVisits = v) } }
+    /** Off leaves `dimReadTextOnly` as it was, so turning dimming back on restores the old choice. */
+    fun setReadDim(v: ReadDim) {
+        p.setBool("dimRead", v != ReadDim.OFF)
+        if (v != ReadDim.OFF) p.setBool("dimReadTextOnly", v == ReadDim.TEXT)
+        set { it.copy(dimRead = v != ReadDim.OFF, dimReadTextOnly = if (v == ReadDim.OFF) it.dimReadTextOnly else v == ReadDim.TEXT) }
+    }
+    fun setSubredditIcons(v: Boolean) { p.setBool("subredditIcons", v); set { it.copy(subredditIcons = v) } }
+    fun setSubredditPrefix(v: Boolean) { p.setBool("subredditPrefix", v); set { it.copy(subredditPrefix = v) } }
+    fun setMarkReadOnScroll(v: Boolean) { p.setBool("markReadOnScroll", v); set { it.copy(markReadOnScroll = v) } }
+
+    /** [key] is one of swipePostStart / swipePostEnd / swipeCommentStart / swipeCommentEnd. */
+    fun setSwipeAction(key: String, a: SwipeAction) {
+        p.setString(key, a.key)
+        set {
+            when (key) {
+                "swipePostStart" -> it.copy(swipePostStart = a)
+                "swipePostEnd" -> it.copy(swipePostEnd = a)
+                "swipeCommentStart" -> it.copy(swipeCommentStart = a)
+                else -> it.copy(swipeCommentEnd = a)
+            }
+        }
+    }
+
+    fun setTapToCollapse(v: Boolean) { p.setBool("tapToCollapse", v); set { it.copy(tapToCollapse = v) } }
+    fun setCollapseRepliesOnly(v: Boolean) { p.setBool("collapseRepliesOnly", v); set { it.copy(collapseRepliesOnly = v) } }
+    fun setVoteEdge(v: Boolean) { p.setBool("voteEdge", v); set { it.copy(voteEdge = v) } }
+    fun setVoteGlow(v: Boolean) { p.setBool("voteGlow", v); set { it.copy(voteGlow = v) } }
+    fun setCommentAvatars(v: Boolean) { p.setBool("commentAvatars", v); set { it.copy(commentAvatars = v) } }
+    fun setAutoTranslate(v: Boolean) { p.setBool("autoTranslate", v); set { it.copy(autoTranslate = v) } }
+    fun setTranslateSecondLanguage(v: String) { p.setString("translateSecondLanguage", v); set { it.copy(translateSecondLanguage = v) } }
+    fun setTranslateService(v: String) { p.setString("translateService", v); set { it.copy(translateService = v) } }
+    fun setAzureRegion(v: String) { p.setString("azureRegion", v); set { it.copy(azureRegion = v) } }
+    fun setVolumeKeyNavigation(v: Boolean) { p.setBool("volumeKeyNavigation", v); set { it.copy(volumeKeyNavigation = v) } }
+    fun setCollapseBelowScore(v: Int?) {
+        if (v == null) p.remove("collapseBelowScore") else p.setInt("collapseBelowScore", v)
+        set { it.copy(collapseBelowScore = v) }
+    }
+    fun setCollapseTopLevel(v: Boolean) { p.setBool("collapseTopLevel", v); set { it.copy(collapseTopLevel = v) } }
+    fun setInAppBrowser(v: Boolean) { p.setBool("inAppBrowser", v); set { it.copy(inAppBrowser = v) } }
+    fun setMidResThumbnails(v: Boolean) { p.setBool("midResThumbnails", v); set { it.copy(midResThumbnails = v) } }
+    fun setSubsCacheEnabled(v: Boolean) { p.setBool("subsCacheEnabled", v); set { it.copy(subsCacheEnabled = v) } }
+    fun setSubsCacheMinutes(v: Int) { p.setInt("subsCacheMinutes", v); set { it.copy(subsCacheMinutes = v) } }
+    fun setImageCacheMb(v: Int) { p.setInt("imageCacheMb", v); set { it.copy(imageCacheMb = v) } }
+    fun setVideoCacheMb(v: Int) { p.setInt("videoCacheMb", v); set { it.copy(videoCacheMb = v) } }
+    fun setFeedKeepMinutes(v: Int) { p.setInt("feedKeepMinutes", v); set { it.copy(feedKeepMinutes = v) } }
+    fun setHiddenPostDays(v: Int) { p.setInt("hiddenPostDays", v); set { it.copy(hiddenPostDays = v) } }
+    fun setTextScale(v: Double) { p.setDouble("textScale", v); set { it.copy(textScale = v) } }
+    fun setAutoplayMedia(v: Boolean) { p.setBool("autoplayMedia", v); set { it.copy(autoplayMedia = v) } }
+    fun setAutoplaySound(v: Boolean) { p.setBool("autoplaySound", v); set { it.copy(autoplaySound = v) } }
+    fun setViewerMuted(v: Boolean) { p.setBool("viewerMuted", v); set { it.copy(viewerMuted = v) } }
+    fun setFeedGalleryCarousel(v: Boolean) { p.setBool("feedGalleryCarousel", v); set { it.copy(feedGalleryCarousel = v) } }
+    fun setShowApiUsage(v: Boolean) { p.setBool("showApiUsage", v); set { it.copy(showApiUsage = v) } }
+    fun setNotifyInbox(v: Boolean) { p.setBool("notifyInbox", v); set { it.copy(notifyInbox = v) } }
+    fun setRedditAppNotifications(v: Boolean) { p.setBool("redditAppNotifications", v); set { it.copy(redditAppNotifications = v) } }
+    fun setHomeFab(v: HomeFab) { p.setInt("homeFab", v.ordinal); set { it.copy(homeFab = v) } }
+    fun setThreadFab(v: ThreadFab) { p.setInt("threadFab", v.ordinal); set { it.copy(threadFab = v) } }
+    fun setThreadFabPosition(v: ThreadFabPosition) { p.setInt("threadFabPosition", v.ordinal); set { it.copy(threadFabPosition = v) } }
+    fun setThreadJumpOp(v: Boolean) { p.setBool("threadJumpOp", v); set { it.copy(threadJumpOp = v) } }
+    fun setThreadJumpMine(v: Boolean) { p.setBool("threadJumpMine", v); set { it.copy(threadJumpMine = v) } }
+    fun setThreadJumpNext(v: Boolean) { p.setBool("threadJumpNext", v); set { it.copy(threadJumpNext = v) } }
+    fun setTopBarMode(v: TopBarMode) { p.setInt("topBarMode", v.ordinal); set { it.copy(topBarMode = v) } }
+    /** [entries] null: back to the default panel (and whatever buttons later versions add to it). */
+    fun setTopBarMenu(mode: TopBarMode, entries: List<TopBarMenuEntry>?) {
+        val key = TopBarMenuItem.prefsKey(mode)
+        if (entries == null) p.remove(key) else p.setStringList(key, TopBarMenuItem.toPrefs(entries))
+        val next = TopBarMenuItem.parse(entries?.let(TopBarMenuItem::toPrefs), mode)
+        set { if (mode == TopBarMode.EXPANDABLE) it.copy(topBarMenuExpandable = next) else it.copy(topBarMenuFull = next) }
+    }
+    fun setNavLabels(v: Boolean) { p.setBool("navLabels", v); set { it.copy(navLabels = v) } }
+    fun setNavStyle(v: Int) { p.setInt("navStyle", v); set { it.copy(navStyle = v) } }
+    /** [entries] null: back to the default side bar (and whatever entries later versions add to it). */
+    fun setSideBarItems(entries: List<SideBarEntry>?) {
+        if (entries == null) p.remove(SideBarItem.PREFS_KEY) else p.setStringList(SideBarItem.PREFS_KEY, SideBarItem.toPrefs(entries))
+        set { it.copy(sideBarItems = SideBarItem.parse(entries?.let(SideBarItem::toPrefs))) }
+    }
+    fun setNavOutline(v: Boolean) { p.setBool("navOutline", v); set { it.copy(navOutline = v) } }
+    fun setButtonHaptics(v: Boolean) { p.setBool("buttonHaptics", v); set { it.copy(buttonHaptics = v) } }
+    fun setBackScrollsToTop(v: Boolean) { p.setBool("backScrollsToTop", v); set { it.copy(backScrollsToTop = v) } }
+    fun setAiModel(v: String) { p.setString("aiModel", v); set { it.copy(aiModel = v) } }
+    fun setAiSummaryStyle(v: Int) { p.setInt("aiSummaryStyle", v); set { it.copy(aiSummaryStyle = v) } }
+    fun setAiSummaryLanguage(v: String) { p.setString("aiSummaryLanguage", v); set { it.copy(aiSummaryLanguage = v) } }
+    fun setAiMaxChars(v: Int) { p.setInt("aiMaxChars", v); set { it.copy(aiMaxChars = v) } }
+    fun setAiUseCustomUrl(v: Boolean) { p.setBool("aiUseCustomUrl", v); set { it.copy(aiUseCustomUrl = v) } }
+    fun setAiBaseUrl(v: String) { p.setString("aiBaseUrl", v); set { it.copy(aiBaseUrl = v) } }
+    fun setAppIcon(v: String) { p.setString("appIcon", v); set { it.copy(appIcon = v) } }
+}
+

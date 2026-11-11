@@ -3,7 +3,7 @@
 **Status: contingency only. Not implemented, and not to be shipped in the
 publicly-distributed (GitHub/F-Droid) build.**
 
-Luli authenticates with Reddit's official OAuth2 API using **bring-your-own
+Kestrel authenticates with Reddit's official OAuth2 API using **bring-your-own
 credentials** (each user registers an "installed app" at
 `reddit.com/prefs/apps` and enters the client ID). Reddit is closing that path:
 self-service app creation appears gated as of late-2025, and unauthenticated
@@ -38,7 +38,7 @@ No OAuth, no client ID. Instead:
    Write actions (vote/comment/save/subscribe) additionally send the modhash as
    the `X-Modhash` header (or `uh=<modhash>` form field).
 
-### The big win for Luli
+### The big win for Kestrel
 `reddit.com/*.json` returns **the same JSON shapes** as `oauth.reddit.com`. So
 the entire model + parsing layer (`Post.fromData`, `Comment.fromChild`,
 `Listing`, `Subreddit`, inbox, etc.) and **all UI/feature code stay unchanged.**
@@ -53,7 +53,7 @@ Only the transport + auth layer changes.
 | `lib/core/reddit_constants.dart` | Add `webBase = 'https://www.reddit.com'`. Keep OAuth constants for the existing mode. |
 | `lib/core/network/reddit_client.dart` | New transport: attach **cookies** (cookie jar) instead of `Authorization: bearer`; append `.json` to GET listing paths; add `X-Modhash` to writes; drop the token-refresh interceptor. Keep User-Agent + `raw_json=1` + the defensive String/JSON decoding. |
 | `lib/features/auth/auth_repository.dart` | Replace `flutter_web_auth_2` OAuth + token exchange/refresh with: WebView cookie-login → fetch `/api/me.json` → store modhash + username. |
-| `lib/features/auth/login_screen.dart` | Replace the client-ID form with a "Sign in with Reddit" button that opens the login WebView. (No credentials are ever typed into Luli — they go to reddit.com in the webview.) |
+| `lib/features/auth/login_screen.dart` | Replace the client-ID form with a "Sign in with Reddit" button that opens the login WebView. (No credentials are ever typed into Kestrel — they go to reddit.com in the webview.) |
 | `lib/core/storage/secure_store.dart` | Store a **cookie bundle per account** instead of a `refresh_token`. The accounts map becomes `{username: cookieBundleJson}`. |
 | `lib/data/reddit_repository.dart` | Mostly unchanged. Audit each endpoint for the `.json` suffix + verify write endpoints (see mapping below). The JSON parsing is untouched. |
 | `pubspec.yaml` | Add deps (below). Remove `flutter_web_auth_2` if fully switching. |

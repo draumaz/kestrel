@@ -6,27 +6,22 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-// Release signing: the same key as the Flutter builds, so the Kotlin app
-// installs as an update over them. key.properties + the .jks are gitignored.
+// Release signing: key.properties + the .jks at the repo root (both gitignored).
 val keystoreProperties = Properties().apply {
     val f = rootProject.file("key.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
-    // Never change: the Flutter app shipped under this id (see the luli note in README).
-    namespace = "com.bennybar.luli_for_reddit"
+    namespace = "xyz.draumaz.kestrel"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.bennybar.luli_for_reddit"
+        applicationId = "xyz.draumaz.kestrel"
         minSdk = 33
         targetSdk = 36
-        // Must exceed every Flutter build's code: its per-ABI APKs were
-        // abi*1000 + build (arm64 v1.0.51 = 2051, x86_64 = 4051). Scheme:
-        // 20000 + build, the same for every ABI.
-        versionCode = 20110
-        versionName = "2.0.70"
+        versionCode = 1
+        versionName = "1.0.0"
     }
 
     dependenciesInfo {
@@ -48,6 +43,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Installs beside the release build.
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

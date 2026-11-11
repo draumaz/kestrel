@@ -1,7 +1,6 @@
-Ilay is an independent, open-source Reddit client with a clean Material 3
+Kestrel is an independent, open-source Reddit client with a clean Material 3
 Expressive design. You bring your own Reddit API credentials. The app talks
-directly to Reddit; the only other data it sends is anonymous usage analytics
-(app launches, version, and OS - no personal data and no advertising IDs).
+directly to Reddit and sends no analytics or tracking data.
 
 Features:
 
@@ -17,7 +16,7 @@ Features:
 * Moderation actions on subreddits you moderate
 * Three feed layouts, swipe-to-vote, NSFW blur (off by default), AMOLED and
   dynamic-color themes
-* Offline cache and in-app updates
+* Offline cache
 
-Ilay is not affiliated with Reddit, Inc. You need a free Reddit account and your
-own API credentials (installed-app type, redirect luli://oauth) to sign in.
+Kestrel is not affiliated with Reddit, Inc. You need a free Reddit account and your
+own API credentials (installed-app type, redirect kestrel://oauth) to sign in.

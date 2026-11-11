@@ -1,0 +1,236 @@
+package xyz.draumaz.kestrel.feature.media
+
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LinearWavyProgressIndicator
+import android.content.ContentValues
+import android.os.Environment
+import android.provider.MediaStore
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import xyz.draumaz.kestrel.app
+import xyz.draumaz.kestrel.core.net.Http
+import xyz.draumaz.kestrel.ui.Overlays
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+import java.io.File
+import java.io.IOException
+import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+// Reddit's CDN (v.redd.it) closes the connection mid-stream for requests
+// without a real User-Agent, so set one and allow a generous timeout.
+private const val DOWNLOAD_UA =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+private val downloadClient by lazy { Http.client.newBuilder().readTimeout(90, TimeUnit.SECONDS).build() }
+
+internal fun mimeFor(ext: String, isVideo: Boolean): String = when (ext) {
+    "png" -> "image/png"
+    "gif" -> "image/gif"
+    "webp" -> "image/webp"
+    "jpg", "jpeg" -> "image/jpeg"
+    "mp4" -> "video/mp4"
+    else -> if (isVideo) "video/mp4" else "image/jpeg"
+}
+
+/**
+ * Downloads [url] into [dest], reporting (received, total) every 128 KB.
+ * Cancelling the caller aborts a blocked connect or read at once, not at the
+ * next chunk or the read timeout.
+ */
+internal suspend fun downloadTo(url: String, dest: File, onProgress: (Long, Long) -> Unit) = withContext(Dispatchers.IO) {
+    val req = Request.Builder().url(url).header("User-Agent", DOWNLOAD_UA).build()
+    val call = downloadClient.newCall(req)
+    // Closes the connection as soon as cancellation starts: the blocked
+    // execute()/read() below then throws. (A completion handler would only run
+    // after that blocked call returned.)
+    val closer = launch(start = CoroutineStart.UNDISPATCHED) {
+        try {
+            awaitCancellation()
+        } finally {
+            call.cancel()
+        }
+    }
+    try {
+        call.execute().use { res ->
+            if (!res.isSuccessful) throw IOException("HTTP ${res.code}")
+            val body = res.body
+            val total = body.contentLength().coerceAtLeast(0)
+            dest.outputStream().use { out ->
+                body.byteStream().use { input ->
+                    val buf = ByteArray(64 * 1024)
+                    var got = 0L
+                    var lastEmit = 0L
+                    while (true) {
+                        ensureActive()
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        got += n
+                        if (got - lastEmit > 128 * 1024 || got == total) {
+                            lastEmit = got
+                            onProgress(got, total)
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e: IOException) {
+        ensureActive() // cancelled: the closed connection's error is a cancellation
+        throw e
+    } finally {
+        closer.cancel()
+    }
+}
+
+/**
+ * The download behind [saveMediaToGallery]: fetches [url] to a temp file,
+ * then copies it into the picked folder (as `kestrel_<ts>`), else the gallery's
+ * "Kestrel" album: Pictures/Kestrel for images *and* videos, named `kestrel_<ts>`, as
+ * the Flutter build's gal plugin saved them, so existing users keep one
+ * album. Runs on the app scope, so leaving the
+ * screen doesn't abort a save; the dialog's Cancel does.
+ */
+internal suspend fun saveMedia(url: String, isVideo: Boolean) {
+    val nav = app.navigatorOrNull ?: return
+    val folder = app.media.folder.value
+    val progress = MutableStateFlow(0L to 0L) // (received, total)
+    val finished = MutableStateFlow(false)
+
+    val job = app.scope.launch(Dispatchers.IO) {
+        val clean = url.substringBefore('?')
+        var ext = if ('.' in clean.substringAfterLast('/')) clean.substringAfterLast('.').lowercase() else ""
+        if (ext.isEmpty() || ext.length > 4) ext = if (isVideo) "mp4" else "jpg"
+        val ts = System.currentTimeMillis()
+        val tmp = File(app.context.cacheDir, "kestrel_$ts.$ext")
+        try {
+            // Reddit's own videos: with their sound (stored as a separate file).
+            if (isVideo && android.net.Uri.parse(url).host == "v.redd.it") {
+                downloadRedditVideo(url, tmp) { got, total -> progress.value = got to total }
+            } else {
+                downloadTo(url, tmp) { got, total -> progress.value = got to total }
+            }
+            val mime = mimeFor(ext, isVideo)
+            if (folder != null && app.media.saveToFolder(folder, tmp, "kestrel_$ts.$ext", mime)) {
+                finished.value = true
+                nav.showSnackbar("Saved to ${folder.name}")
+                return@launch
+            }
+            insertIntoGallery(tmp, tmp.name, mime, isVideo)
+            finished.value = true
+            nav.showSnackbar(
+                if (folder == null) "Saved to your gallery"
+                else "Couldn't open ${folder.name}, so saved to your gallery. Pick the folder again in Settings.",
+            )
+        } catch (e: CancellationException) {
+            finished.value = true
+            nav.showSnackbar("Download cancelled")
+            throw e
+        } catch (e: IOException) {
+            finished.value = true
+            nav.showSnackbar(if (isActive) "Could not save" else "Download cancelled")
+        } catch (e: Exception) {
+            finished.value = true
+            nav.showSnackbar("Could not save: ${e.message ?: e}")
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    // Cancelled before the download even started: the body never ran, so
+    // close the dialog (and report) from here.
+    job.invokeOnCompletion { cause ->
+        if (!finished.value && cause is CancellationException) nav.showSnackbar("Download cancelled")
+        finished.value = true
+    }
+    app.scope.launch {
+        Overlays.show<Unit> { done ->
+            LaunchedEffect(Unit) {
+                finished.first { it }
+                done(null)
+            }
+            SavingDialog(progress, onCancel = { job.cancel() })
+        }
+    }
+    job.join()
+}
+
+/** MediaStore insert into Pictures/Kestrel — videos too, like gal did (no storage permission needed). */
+private fun insertIntoGallery(file: File, name: String, mime: String, isVideo: Boolean) {
+    val resolver = app.context.contentResolver
+    val collection = if (isVideo) {
+        MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    } else {
+        MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    }
+    val values = ContentValues().apply {
+        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+        put(MediaStore.MediaColumns.MIME_TYPE, mime)
+        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Kestrel")
+        put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(collection, values) ?: throw IOException("The gallery refused the file")
+    try {
+        resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
+        resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+    } catch (e: Exception) {
+        resolver.delete(uri, null, null)
+        throw e
+    }
+}
+
+private fun mb(bytes: Long) = String.format(Locale.US, "%.1f", bytes / 1048576.0)
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun SavingDialog(progress: StateFlow<Pair<Long, Long>>, onCancel: () -> Unit, verb: String = "Saving") {
+    val p by progress.collectAsStateWithLifecycle()
+    val (received, total) = p
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        text = {
+            // Material 3 Expressive's wavy bar: filling up when the size is known, travelling otherwise.
+            Column {
+                Text(if (total > 0) "$verb… ${mb(received)} / ${mb(total)} MB" else "$verb…")
+                Spacer(Modifier.height(16.dp))
+                if (total > 0) {
+                    LinearWavyProgressIndicator(
+                        progress = { (received.toFloat() / total).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+    )
+}

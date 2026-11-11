@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Ilay for Reddit"
+rootProject.name = "Kestrel for Reddit"
 include(":app")
  

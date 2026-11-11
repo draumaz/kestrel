@@ -1,11 +1,8 @@
-# Ilay for Reddit
+# Kestrel for Reddit
 
 A fast, modern Reddit client for Android, built natively with Kotlin and
 Jetpack Compose in a Material 3 Expressive design. You bring your own Reddit API credentials. The app talks
-directly to Reddit; the only other data it sends is anonymous usage analytics
-(app launches, version, OS, which feed you use, whether Reddit Home loaded, and
-a rough count of posts opened per visit — no personal data, ad IDs, subreddits
-or posts). Turn it off in Settings → About → Send anonymous usage stats.
+directly to Reddit and sends no analytics or tracking data.
 
 ## Features
 
@@ -20,25 +17,15 @@ or posts). Turn it off in Settings → About → Send anonymous usage stats.
 - Saved, upvoted, and locally-stored history
 - Moderation actions on subreddits you moderate
 - Three feed layouts, swipe-to-vote, NSFW blur, AMOLED and dynamic-color themes
-- Offline cache, rate-limit awareness, and an in-app updater
-
-## Screenshots
-
-<p>
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1.png" width="200" alt="For You feed">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2.png" width="200" alt="Post">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3.png" width="200" alt="Comments">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4.png" width="200" alt="Explore">
-  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5.png" width="200" alt="Settings">
-</p>
+- Offline cache and rate-limit awareness
 
 ## How the "For You" feed works
 
 Reddit doesn't give third-party apps access to its own recommendation engine, so
-Ilay builds one on your device. Nothing about your interests ever leaves the
+Kestrel builds one on your device. Nothing about your interests ever leaves the
 phone.
 
-1. **Candidates.** Ilay pulls a pool of posts from the sources that actually
+1. **Candidates.** Kestrel pulls a pool of posts from the sources that actually
    matter to you: your subscription frontpage, fresh posts from your favourite
    subreddits, the communities you engage with most, what's rising in your
    subscriptions, and a small slice of r/popular for discovery. The feed is
@@ -66,19 +53,13 @@ phone.
    "Trending"), and a long-press lets you ask for more or less of a community,
    or mute it entirely.
 
-## Install
-
-Download the APK from the
-[latest release](https://github.com/bennybar/LuliReddit/releases/latest) and
-install it. The app checks GitHub for newer releases and can update itself.
-
 ## First run
 
 **Recommended — official API (bring your own key):**
 
 1. Go to <https://www.reddit.com/prefs/apps> and create an app of type
    **installed app**.
-2. Set the redirect URI to exactly `luli://oauth`.
+2. Set the redirect URI to exactly `kestrel://oauth`.
 3. Copy the client ID (shown under the app name) into the login screen and
    connect.
 
@@ -101,7 +82,12 @@ Requires Android Studio (its bundled JDK) and the Android SDK.
 ```
 
 Release signing reads `key.properties` and the keystore from the repo root
-(not committed). Without them, build a debug APK with `./gradlew :app:assembleDebug`.
+(not committed). Without them, build a debug APK with `./gradlew :app:assembleDebug`;
+it installs as `xyz.draumaz.kestrel.debug`, beside a release build.
+
+The in-app update checker and anonymous analytics are off. To turn them on, set
+`GITHUB_REPO` in `core/RedditConstants.kt` (releases are read from that
+"owner/repo") and an Aptabase `APP_KEY` in `core/Analytics.kt`.
 
 ## Tech
 
@@ -110,4 +96,4 @@ kotlinx.serialization, Coil, Media3, WorkManager. Reddit OAuth2
 (installed-app flow), credentials stored in Android's encrypted storage.
 No Google Play Services.
 
-Not affiliated with Reddit, Inc.
+Licensed under the MIT License (see `LICENSE`). Not affiliated with Reddit, Inc.

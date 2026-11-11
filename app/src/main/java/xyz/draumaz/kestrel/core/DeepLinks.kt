@@ -1,0 +1,115 @@
+package xyz.draumaz.kestrel.core
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import xyz.draumaz.kestrel.core.net.Http
+import xyz.draumaz.kestrel.nav.Route
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.Request
+
+/** True for reddit.com / *.reddit.com / redd.it / *.redd.it (media) hosts. */
+fun isRedditHost(host: String?): Boolean {
+    val h = host?.lowercase() ?: return false
+    return h == "redd.it" || h.endsWith(".redd.it") || h == "reddit.com" || h.endsWith(".reddit.com")
+}
+
+/**
+ * The first reddit.com / redd.it link in shared text. Apps share a post as
+ * the bare URL or as "title https://…", sometimes with trailing punctuation.
+ */
+fun redditUrlInText(text: String?): String? =
+    Regex("""https?://[^\s<>"]+""").findAll(text ?: return null)
+        .map { it.value.trimEnd('.', ',', ')', '!', '?') }
+        .firstOrNull { isRedditHost(runCatching { java.net.URI(it).host }.getOrNull()) }
+
+/**
+ * A VIEW intent for [uri] outside Kestrel. When Kestrel is set to open Reddit links
+ * by default, a plain VIEW of a reddit.com / redd.it URL would land straight
+ * back in Kestrel, so those go to the default web browser explicitly.
+ */
+fun externalViewIntent(context: Context, uri: Uri): Intent {
+    val intent = Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    if (!isRedditHost(uri.host)) return intent
+    val pm = context.packageManager
+    val probe = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com"))
+    val browser = pm.resolveActivity(probe, 0)?.activityInfo?.packageName?.takeIf { it != context.packageName && it != "android" }
+        ?: pm.queryIntentActivities(probe, 0).map { it.activityInfo.packageName }.firstOrNull { it != context.packageName }
+    browser?.let(intent::setPackage)
+    return intent
+}
+
+/** Reddit's media hosts (i.redd.it, v.redd.it, preview.redd.it…): open in the image / video viewer. */
+fun isRedditMediaHost(host: String?): Boolean = host?.lowercase()?.endsWith(".redd.it") == true
+
+/** A share link (`reddit.com/r/<sub>/s/<code>`, or `/u/<name>/s/<code>` for a custom feed): it only redirects to the real post / comment / feed URL. */
+fun isShareLink(uri: Uri): Boolean {
+    if (!isRedditHost(uri.host)) return false
+    val s = uri.pathSegments.filter { it.isNotEmpty() }
+    return s.size >= 4 && (s[0] == "r" || s[0] == "u" || s[0] == "user") && s[2] == "s"
+}
+
+/** Follows a [isShareLink] URL's redirects (up to 3) to the link it stands for; null if it can't. */
+suspend fun resolveShareLink(uri: Uri): Uri? = withContext(Dispatchers.IO) {
+    val client = Http.client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    var url = uri.toString()
+    fun location(head: Boolean): String? = runCatching {
+        val req = Request.Builder().url(url).header("User-Agent", RedditConstants.WEB_USER_AGENT)
+            .apply { if (head) head() }.build()
+        client.newCall(req).execute().use { it.header("location") }
+    }.getOrNull()
+    repeat(3) {
+        // HEAD first (no body); some servers only redirect a GET.
+        val next = location(head = true) ?: location(head = false) ?: return@withContext null
+        val target = if (next.startsWith("/")) "https://www.reddit.com$next" else next
+        val u = Uri.parse(target)
+        if (!isShareLink(u)) return@withContext u
+        url = target
+    }
+    null
+}
+
+/**
+ * The in-app post a link to a Reddit post opens — a permalink, relative
+ * (`/r/…/comments/…`, `/user/…/comments/…`, a crosspost's own url) or on
+ * reddit.com, or a redd.it short link — or null for any other link.
+ */
+fun redditPostRoute(url: String): Route.Post? =
+    routeForRedditUrl(Uri.parse(if (url.startsWith("/")) "https://www.reddit.com$url" else url)) as? Route.Post
+
+/** Maps a reddit.com / redd.it URL to an in-app route, or null if unsupported. */
+fun routeForRedditUrl(uri: Uri): Route? {
+    val host = uri.host?.lowercase() ?: return null
+    val segs = uri.pathSegments.filter { it.isNotEmpty() }
+
+    // Short links: redd.it/<postId>
+    if (host == "redd.it") return segs.firstOrNull()?.let { Route.Post("_", it) }
+    if (!(host == "reddit.com" || host.endsWith(".reddit.com"))) return null
+
+    // Comment / post permalinks: /r/<sub>/comments/<id>/<slug>/<commentId> or
+    // /comments/<id>. A segment after the title slug is a focused comment.
+    val ci = segs.indexOf("comments")
+    if (ci != -1 && ci + 1 < segs.size) {
+        val id = segs[ci + 1]
+        val sub = if (ci >= 2 && segs[ci - 2] == "r") segs[ci - 1] else "_"
+        val commentId = if (segs.size > ci + 3) segs[ci + 3] else null
+        return Route.Post(sub, id, focusCommentId = commentId)
+    }
+
+    // Gallery: /gallery/<id> is the post itself.
+    if (segs.size >= 2 && segs[0] == "gallery") return Route.Post("_", segs[1])
+    // A share link must be resolved first (resolveShareLink): /r/<sub>/s/<code>
+    // is a post, not the subreddit; /u/<name>/s/<code> a custom feed, not the user.
+    if (segs.size >= 4 && (segs[0] == "r" || segs[0] == "u" || segs[0] == "user") && segs[2] == "s") return null
+
+    // Multireddit: /user/<name>/m/<multi>
+    if (segs.size >= 4 && (segs[0] == "user" || segs[0] == "u") && segs[2] == "m") {
+        return Route.Multireddit(segs[1], segs[3])
+    }
+    // User: /u/<name> or /user/<name>
+    if (segs.size >= 2 && (segs[0] == "u" || segs[0] == "user")) return Route.User(segs[1])
+    // Subreddit: /r/<sub>
+    if (segs.size >= 2 && segs[0] == "r") return Route.Subreddit(segs[1])
+    return null
+}
