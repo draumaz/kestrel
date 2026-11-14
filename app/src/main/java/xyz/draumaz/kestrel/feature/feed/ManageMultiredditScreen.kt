@@ -21,7 +21,7 @@ import androidx.compose.material.icons.rounded.SubdirectoryArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
-import androidx.compose.material3.AlertDialog
+import xyz.draumaz.kestrel.ui.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon

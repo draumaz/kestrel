@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
 import xyz.draumaz.kestrel.ui.subredditName
+import xyz.draumaz.kestrel.ui.LocalOpenThread
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.ui.text.AnnotatedString
@@ -412,11 +413,19 @@ fun PostCard(listed: Post, modifier: Modifier = Modifier, swipeOverride: Pair<Sw
             // and all, into an offscreen layer every frame it scrolls.
             // Settings → Dim read posts: the whole card (veil), or only its
             // title and text so images and videos stay bright, or Off (#106).
-            val dimRead = seen && settings.trackHistory && settings.dimRead
-            val veil = if (dimRead && !settings.dimReadTextOnly) cs.surface.copy(alpha = 0.45f) else Color.Transparent
+            // Two panes: the post open in the thread pane beside the feed is tinted, not dimmed.
+            val open = LocalOpenThread.current.let { it != null && (it == listed.id || it == post.id) }
+            val dimRead = seen && settings.trackHistory && settings.dimRead && !open
+            val veil = when {
+                open -> cs.primary.copy(alpha = 0.12f)
+                dimRead && !settings.dimReadTextOnly -> cs.surface.copy(alpha = 0.45f)
+                else -> Color.Transparent
+            }
             val dim = Modifier.drawWithContent {
                 drawContent()
-                if (veil.alpha > 0f) drawRect(veil)
+                // The card's own corners (this draws outside its clip).
+                if (open) drawRoundRect(veil, cornerRadius = androidx.compose.ui.geometry.CornerRadius(28.dp.toPx()))
+                else if (veil.alpha > 0f) drawRect(veil)
             }
             CompositionLocalProvider(LocalReadTextDim provides (dimRead && settings.dimReadTextOnly)) {
                 when (settings.postDisplay) {

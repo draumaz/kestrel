@@ -90,7 +90,7 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Mail
 import androidx.compose.material.icons.rounded.MailOutline
-import androidx.compose.material3.AlertDialog
+import xyz.draumaz.kestrel.ui.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button

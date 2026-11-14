@@ -42,6 +42,8 @@ sealed interface Route {
     @Serializable data class Multireddit(val username: String, val name: String) : Route
     @Serializable data class ManageMultireddit(val username: String, val name: String) : Route
     /** A post + comments. The already-loaded Post (if any) is in [NavCache] under [postId]. */
+    /** The thread pane with no thread open (two panes only: tablets, the Surface Duo). */
+    @Serializable data object NoThread : Route
     @Serializable data class Post(val subreddit: String, val postId: String, val focusCommentId: String? = null) : Route
 }
 

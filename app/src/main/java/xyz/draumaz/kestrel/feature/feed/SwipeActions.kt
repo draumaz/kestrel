@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
 import androidx.compose.animation.core.Animatable
+import xyz.draumaz.kestrel.ui.paneSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -42,7 +43,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -167,7 +167,7 @@ fun SwipeActions(
     val scope = rememberCoroutineScope()
     val threshold = with(density) { 64.dp.toPx() }
     // Far enough for the pill to take real space, with the row still in view.
-    val maxDrag = LocalWindowInfo.current.containerSize.width * 0.45f
+    val maxDrag = with(LocalDensity.current) { paneSize().width.toPx() } * 0.45f
     val tracker = remember(threshold, maxDrag) { SwipeTracker(threshold = threshold, maxDrag = maxDrag) }
     // The visible offset: follows the finger, then springs back on release.
     val offset = remember { Animatable(0f) }

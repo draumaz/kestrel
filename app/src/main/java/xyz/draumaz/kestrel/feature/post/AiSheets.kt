@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.post
 
 import xyz.draumaz.kestrel.ui.Loading
+import xyz.draumaz.kestrel.ui.paneSize
 import android.provider.Settings
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
@@ -51,7 +52,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import xyz.draumaz.kestrel.ui.ModalBottomSheet
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,7 +75,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -232,7 +232,7 @@ private fun SummarySheet(
     // Opens fully, at most 92% tall, and scrolls inside. (It used to open half
     // way with a 92%-tall body, so the end of a long summary sat off-screen
     // where scrolling couldn't bring it into view.)
-    val maxHeight = LocalConfiguration.current.screenHeightDp.dp * 0.92f
+    val maxHeight = paneSize().height * 0.92f
     ModalBottomSheet(onDismissRequest = done, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
             Modifier
@@ -370,7 +370,7 @@ private fun AskThreadSheet(
         }
     }
 
-    val height = LocalConfiguration.current.screenHeightDp.dp * 0.75f
+    val height = paneSize().height * 0.75f
     ModalBottomSheet(onDismissRequest = done, sheetState = sheet) {
         Column(Modifier.height(height).imePadding()) {
             Row(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -461,7 +461,7 @@ private fun AskThreadSheet(
 @Composable
 private fun Bubble(m: AiMessage, onOpenComment: (String) -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val maxW = LocalConfiguration.current.screenWidthDp.dp * 0.82f
+    val maxW = paneSize().width * 0.82f
     Box(Modifier.fillMaxWidth().padding(top = 10.dp), contentAlignment = if (m.fromUser) Alignment.CenterEnd else Alignment.CenterStart) {
         Box(
             Modifier

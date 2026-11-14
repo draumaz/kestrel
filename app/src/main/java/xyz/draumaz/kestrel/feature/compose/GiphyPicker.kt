@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.compose
 
 import xyz.draumaz.kestrel.ui.SearchIcon
+import xyz.draumaz.kestrel.ui.paneSize
 import xyz.draumaz.kestrel.ui.Loading
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,7 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import xyz.draumaz.kestrel.ui.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -41,7 +42,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -124,7 +124,7 @@ private fun GiphySheet(apiKey: String, done: (String?) -> Unit) {
         runCatching { focus.requestFocus() }
     }
 
-    val height = LocalConfiguration.current.screenHeightDp.dp * 0.6f
+    val height = paneSize().height * 0.6f
     ModalBottomSheet(onDismissRequest = { done(null) }, sheetState = sheet) {
         Column(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp).imePadding().height(height)) {
             TextField(

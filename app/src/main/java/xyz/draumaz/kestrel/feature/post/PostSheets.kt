@@ -51,7 +51,7 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.rounded.OfflinePin
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Repeat
-import androidx.compose.material3.AlertDialog
+import xyz.draumaz.kestrel.ui.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -59,7 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import xyz.draumaz.kestrel.ui.ModalBottomSheet
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text

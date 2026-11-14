@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.post
 
 import androidx.compose.animation.core.Spring
+import xyz.draumaz.kestrel.ui.paneSize
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -24,7 +25,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -65,7 +65,7 @@ fun SwipeActions(
     val density = LocalDensity.current
     val threshold = with(density) { 64.dp.toPx() }
     // Far enough for the pill to take real space, with the row still in view.
-    val maxDrag = LocalWindowInfo.current.containerSize.width * 0.45f
+    val maxDrag = with(LocalDensity.current) { paneSize().width.toPx() } * 0.45f
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val haptic = LocalHapticFeedback.current
     val startSpec by rememberUpdatedState(start)

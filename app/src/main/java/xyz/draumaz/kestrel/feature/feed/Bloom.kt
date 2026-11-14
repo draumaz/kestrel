@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
 import xyz.draumaz.kestrel.ui.SearchIcon
+import xyz.draumaz.kestrel.ui.paneSize
 import androidx.compose.material3.IconButtonDefaults
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -54,7 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -143,7 +143,8 @@ fun TapGuard(durationMs: Long = 300, content: @Composable () -> Unit) {
 @Composable
 fun feedDecodeWidth(): Int {
     val density = LocalDensity.current
-    val widthDp = LocalConfiguration.current.screenWidthDp
+    // The pane's width: on two panes a feed is narrower than the screen.
+    val widthDp = paneSize().width.value
     return remember(density, widthDp) { (widthDp * density.density).toInt().coerceAtLeast(1) }
 }
 

@@ -47,16 +47,49 @@ class AppNavigator(
     val scope: CoroutineScope,
     /** Full-screen media viewers, drawn over the current screen (see KestrelActivity). */
     val viewers: ViewerStack = ViewerStack(),
+    /**
+     * On two panes (tablets, the Surface Duo's two screens), the thread pane's navigator has the
+     * app's main one as its parent: threads stack up in its own pane, everything else opens in
+     * the main pane beside it. Null for the main navigator.
+     */
+    val parent: AppNavigator? = null,
 ) {
-    val snackbar = SnackbarHostState()
+    val snackbar: SnackbarHostState = parent?.snackbar ?: SnackbarHostState()
 
     /** Extra bottom padding for snackbars (the home shell's floating nav sets it). */
     var snackbarBottomPadding: Dp by mutableStateOf(0.dp)
 
+    /** The thread pane's navigator while there are two panes (set on the main navigator by KestrelActivity). */
+    var detail: AppNavigator? by mutableStateOf(null)
+
+    /**
+     * Two panes: whether the thread pane is the one in use (last touched, or just opened a
+     * thread). Back acts there first; sheets and dialogs open over it. Kept on the main navigator.
+     */
+    var threadPaneActive: Boolean
+        get() = parent?.threadPaneActive ?: threadActive
+        set(value) { parent?.let { it.threadPaneActive = value } ?: run { threadActive = value } }
+    private var threadActive by mutableStateOf(false)
+
     /** Opens a screen; an open media viewer would hide it, so it's closed first. */
     fun push(route: Route) {
         viewers.clear()
-        controller.navigate(route) { launchSingleTop = route is Route.Home }
+        val detail = detail
+        when {
+            // Two panes: a thread opened from the main pane takes the thread pane's place, rather
+            // than stacking up every post read from the feed behind Back.
+            route is Route.Post && detail != null -> {
+                threadPaneActive = true
+                detail.controller.navigate(route) { popUpTo<Route.NoThread>() }
+            }
+            // In the thread pane: a thread linked from a thread stacks; anything else (a
+            // subreddit, a user, settings) opens in the main pane beside it.
+            parent != null && route !is Route.Post -> parent.push(route)
+            else -> {
+                threadPaneActive = parent != null
+                controller.navigate(route) { launchSingleTop = route is Route.Home }
+            }
+        }
     }
 
     fun pop(): Boolean = controller.popBackStack()
@@ -68,6 +101,7 @@ class AppNavigator(
      * KestrelActivity's screen()). Like the side bar's tabs, Back from it is Posts.
      */
     fun openFromSideBar(route: Route) {
+        parent?.let { return it.openFromSideBar(route) }
         viewers.clear()
         app.feed.openTab.value = 0
         controller.navigate(route) { popUpTo<Route.Home>() }
@@ -76,12 +110,14 @@ class AppNavigator(
 
     /** A tab picked in the side bar of a page it opened: back to the home shell, on that tab. */
     fun openTabFromSideBar(index: Int) {
+        parent?.let { return it.openTabFromSideBar(index) }
         app.feed.openTab.value = index
         controller.popBackStack<Route.Home>(inclusive = false)
     }
 
     /** Clears the back stack and shows [route] (login ↔ home). */
     fun resetTo(route: Route) {
+        parent?.let { return it.resetTo(route) }
         viewers.clear()
         controller.navigate(route) {
             popUpTo(0) { inclusive = true }

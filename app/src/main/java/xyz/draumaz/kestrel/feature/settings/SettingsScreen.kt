@@ -123,7 +123,7 @@ import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.automirrored.outlined.Label
-import androidx.compose.material3.AlertDialog
+import xyz.draumaz.kestrel.ui.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
