@@ -68,4 +68,46 @@ class HistoryStoreTest {
         val c = Comment.fromChild(AppJson.parseToJsonElement("""{"kind":"t1","data":{"id":"x","body":"b","over_18":true}}"""), 0)
         assertTrue(c.over18)
     }
+
+    // #148: History shows the newest 500, but posts read longer ago still count
+    // as read, across restarts; removing or clearing forgets them too.
+    @Test fun readIdsOutliveTheHistoryCap() {
+        val p = prefs()
+        p.setStringList("history_bob", listOf("""{"id":"old","sub":"pics","title":"T","permalink":"/p","ts":1}"""))
+        val h = HistoryStore(p)
+        h.onUserChanged("bob")
+        assertTrue("seeded from history", h.contains("old"))
+        for (i in 0 until 700) h.markViewed(post("p$i"))
+        assertEquals(500, h.state.value.size)
+        assertTrue(h.contains("p0"))
+        assertTrue(h.contains("old"))
+        val again = HistoryStore(p)
+        again.onUserChanged("bob")
+        assertTrue(again.contains("p0"))
+        assertTrue(again.contains("p699"))
+        again.removeViewed("p0")
+        assertFalse(again.contains("p0"))
+        again.clearOlderThan(60_000)
+        assertFalse("legacy entries count as old", again.contains("old"))
+        assertTrue(again.contains("p1"))
+        again.clear()
+        assertFalse(again.contains("p1"))
+        val other = HistoryStore(p)
+        other.onUserChanged("alice")
+        assertTrue(other.ids.value.isEmpty())
+    }
+
+    // #154: Undo puts a removed entry back where it was, read again.
+    @Test fun restorePutsAnEntryBackInPlace() {
+        val h = HistoryStore(prefs())
+        h.onUserChanged("bob")
+        for (id in listOf("a", "b", "c")) { h.markViewed(post(id)); Thread.sleep(2) }
+        val b = h.state.value.first { it.id == "b" }
+        h.removeViewed("b")
+        assertFalse(h.contains("b"))
+        h.restore(b)
+        h.restore(b)
+        assertEquals(listOf("c", "b", "a"), h.state.value.map { it.id })
+        assertTrue(h.contains("b"))
+    }
 }

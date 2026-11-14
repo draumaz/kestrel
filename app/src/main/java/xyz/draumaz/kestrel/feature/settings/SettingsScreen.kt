@@ -1,5 +1,6 @@
 package xyz.draumaz.kestrel.feature.settings
 
+import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.outlined.Folder
 import android.provider.DocumentsContract
@@ -7,6 +8,8 @@ import xyz.draumaz.kestrel.ui.SearchIcon
 import androidx.compose.material.icons.outlined.PostAdd
 import androidx.compose.material.icons.rounded.FilterList
 import androidx.compose.material.icons.rounded.Tag
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Notifications
@@ -457,7 +460,7 @@ fun SettingsList(
                 ?.let(ctrl::setFeedKeepMinutes)
         })
         switch(
-            "Hide read posts", "Skip posts you've already read when your front page and custom feeds load or refresh",
+            "Hide read posts", "Skip posts you've already read when your front page, For You and custom feeds load or refresh",
             Icons.Outlined.VisibilityOff, s.hideReadPosts, ctrl::setHideReadPosts,
         )
         if (s.hideReadPosts) {
@@ -502,6 +505,10 @@ fun SettingsList(
         switch(
             "r/ before subreddit names", "Show \"r/pics\" on posts and lists. Off: just \"pics\"",
             Icons.Rounded.Tag, s.subredditPrefix, ctrl::setSubredditPrefix,
+        )
+        switch(
+            "u/ before your name in the side bar", "Show \"u/you\" at the top of the side bar. Off: just \"you\"",
+            Icons.Rounded.AlternateEmail, s.sideBarUserPrefix, ctrl::setSideBarUserPrefix,
         )
         add(Entry("appIcon", "App icon launcher home screen colour") {
             val current = AppIcon.parse(s.appIcon)
@@ -595,6 +602,12 @@ fun SettingsList(
                 onClick = ::showSideBarItems,
             )
         }
+        tile(
+            "Explore sections",
+            s.exploreSections.filter { it.shown }.joinToString { it.section.label },
+            Icons.Rounded.Explore,
+            onClick = ::showExploreSections,
+        )
         if (s.navStyle != 1) {
             switch(
                 "Bottom bar labels", "Show text labels under the navigation icons",
@@ -711,6 +724,10 @@ fun SettingsList(
         switch(
             "Open videos muted", "Full-screen videos start muted; tap the speaker for sound",
             Icons.AutoMirrored.Rounded.VolumeOff, s.viewerMuted, ctrl::setViewerMuted,
+        )
+        switch(
+            "Loop videos", "Full-screen videos start over at the end. Off: they stop, with a replay button. GIFs always loop",
+            Icons.Rounded.Repeat, s.loopVideos, ctrl::setLoopVideos,
         )
         switch(
             "Gallery carousel in feeds", "Galleries show a big image with the next ones beside it. Off: one image at a time",

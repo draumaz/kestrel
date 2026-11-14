@@ -328,7 +328,7 @@ fun HomeScreen() {
                 // Its feed runs under the status bar; it pads its own top bar.
                 0 -> FrontpageTab(selected = index == 0)
                 1 -> ExploreTab() // runs under the status bar, with its own fade (#127)
-                2 -> Box(Modifier.statusBarsPadding()) { InboxScreen(reselect = inboxReselect) }
+                2 -> Box(Modifier.statusBarsPadding()) { InboxScreen(reselect = inboxReselect, selected = index == 2) }
                 else -> Box(Modifier.statusBarsPadding()) { ProfileTab() }
             }
         }
@@ -502,7 +502,8 @@ private fun SideBar(selected: Int, current: Route?, unread: Int, open: Boolean, 
                     color = cs.onSurfaceVariant,
                 )
             } else {
-                Column(
+                // Your name and karma beside your picture, a size up (#167).
+                Row(
                     Modifier
                         .padding(top = 8.dp, bottom = 8.dp)
                         .fillMaxWidth()
@@ -511,16 +512,25 @@ private fun SideBar(selected: Int, current: Route?, unread: Int, open: Boolean, 
                         // Stands in for the Profile row (#64).
                         .clickable { onTab(3) }
                         .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     LetterAvatar(username, 64.dp, cs.primaryContainer, cs.onPrimaryContainer, imageUrl = me?.iconUrl, fontSize = 26.sp)
-                    Spacer(Modifier.height(10.dp))
-                    Text("u/$username", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    me?.let {
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            "${compactNumber(it.linkKarma + it.commentKarma)} karma",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = cs.onSurfaceVariant,
+                            if (settings.sideBarUserPrefix) "u/$username" else username,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        me?.let {
+                            Text(
+                                "${compactNumber(it.linkKarma + it.commentKarma)} karma",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = cs.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

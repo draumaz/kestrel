@@ -48,6 +48,7 @@ class SettingsStore(private val p: Prefs) {
             dimRead = b("dimRead", d.dimRead),
             subredditIcons = b("subredditIcons", d.subredditIcons),
             subredditPrefix = b("subredditPrefix", d.subredditPrefix),
+            sideBarUserPrefix = b("sideBarUserPrefix", d.sideBarUserPrefix),
             markReadOnScroll = b("markReadOnScroll", d.markReadOnScroll),
             swipePostStart = SwipeAction.parse(p.getString("swipePostStart"), SwipeAction.UPVOTE),
             swipePostEnd = SwipeAction.parse(p.getString("swipePostEnd"), SwipeAction.DOWNVOTE),
@@ -94,6 +95,7 @@ class SettingsStore(private val p: Prefs) {
             autoplayMedia = b("autoplayMedia", d.autoplayMedia),
             autoplaySound = b("autoplaySound", d.autoplaySound),
             viewerMuted = b("viewerMuted", d.viewerMuted),
+            loopVideos = b("loopVideos", d.loopVideos),
             feedGalleryCarousel = b("feedGalleryCarousel", d.feedGalleryCarousel),
             showApiUsage = b("showApiUsage", d.showApiUsage),
             notifyInbox = b("notifyInbox", d.notifyInbox),
@@ -114,6 +116,7 @@ class SettingsStore(private val p: Prefs) {
             navLabels = b("navLabels", d.navLabels),
             navStyle = (p.getInt("navStyle") ?: d.navStyle).coerceIn(0, 2),
             sideBarItems = SideBarItem.parse(p.getStringList(SideBarItem.PREFS_KEY)),
+            exploreSections = ExploreSection.parse(p.getStringList(ExploreSection.PREFS_KEY)),
             navOutline = b("navOutline", d.navOutline),
             buttonHaptics = b("buttonHaptics", d.buttonHaptics),
             backScrollsToTop = b("backScrollsToTop", d.backScrollsToTop),
@@ -213,6 +216,7 @@ class SettingsStore(private val p: Prefs) {
     }
     fun setSubredditIcons(v: Boolean) { p.setBool("subredditIcons", v); set { it.copy(subredditIcons = v) } }
     fun setSubredditPrefix(v: Boolean) { p.setBool("subredditPrefix", v); set { it.copy(subredditPrefix = v) } }
+    fun setSideBarUserPrefix(v: Boolean) { p.setBool("sideBarUserPrefix", v); set { it.copy(sideBarUserPrefix = v) } }
     fun setMarkReadOnScroll(v: Boolean) { p.setBool("markReadOnScroll", v); set { it.copy(markReadOnScroll = v) } }
 
     /** [key] is one of swipePostStart / swipePostEnd / swipeCommentStart / swipeCommentEnd. */
@@ -255,6 +259,7 @@ class SettingsStore(private val p: Prefs) {
     fun setAutoplayMedia(v: Boolean) { p.setBool("autoplayMedia", v); set { it.copy(autoplayMedia = v) } }
     fun setAutoplaySound(v: Boolean) { p.setBool("autoplaySound", v); set { it.copy(autoplaySound = v) } }
     fun setViewerMuted(v: Boolean) { p.setBool("viewerMuted", v); set { it.copy(viewerMuted = v) } }
+    fun setLoopVideos(v: Boolean) { p.setBool("loopVideos", v); set { it.copy(loopVideos = v) } }
     fun setFeedGalleryCarousel(v: Boolean) { p.setBool("feedGalleryCarousel", v); set { it.copy(feedGalleryCarousel = v) } }
     fun setShowApiUsage(v: Boolean) { p.setBool("showApiUsage", v); set { it.copy(showApiUsage = v) } }
     fun setNotifyInbox(v: Boolean) { p.setBool("notifyInbox", v); set { it.copy(notifyInbox = v) } }
@@ -279,6 +284,11 @@ class SettingsStore(private val p: Prefs) {
     fun setSideBarItems(entries: List<SideBarEntry>?) {
         if (entries == null) p.remove(SideBarItem.PREFS_KEY) else p.setStringList(SideBarItem.PREFS_KEY, SideBarItem.toPrefs(entries))
         set { it.copy(sideBarItems = SideBarItem.parse(entries?.let(SideBarItem::toPrefs))) }
+    }
+    /** [entries] null: back to the default Explore (and whatever sections later versions add to it). */
+    fun setExploreSections(entries: List<ExploreEntry>?) {
+        if (entries == null) p.remove(ExploreSection.PREFS_KEY) else p.setStringList(ExploreSection.PREFS_KEY, ExploreSection.toPrefs(entries))
+        set { it.copy(exploreSections = ExploreSection.parse(entries?.let(ExploreSection::toPrefs))) }
     }
     fun setNavOutline(v: Boolean) { p.setBool("navOutline", v); set { it.copy(navOutline = v) } }
     fun setButtonHaptics(v: Boolean) { p.setBool("buttonHaptics", v); set { it.copy(buttonHaptics = v) } }

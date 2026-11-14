@@ -8,7 +8,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material.icons.rounded.EditNote
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -18,10 +17,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
@@ -33,7 +32,6 @@ import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.OfflinePin
-import androidx.compose.material.icons.rounded.PeopleAlt
 import androidx.compose.material.icons.rounded.PersonAddAlt1
 import androidx.compose.material.icons.rounded.TravelExplore
 import xyz.draumaz.kestrel.ui.AlertDialog
@@ -70,6 +68,10 @@ import xyz.draumaz.kestrel.auth.SessionState
 import xyz.draumaz.kestrel.feature.feed.BloomCard
 import xyz.draumaz.kestrel.feature.feed.LetterAvatar
 import xyz.draumaz.kestrel.feature.feed.Tile
+import xyz.draumaz.kestrel.feature.feed.MenuAction
+import xyz.draumaz.kestrel.feature.feed.showBarMenu
+import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.outlined.Settings
 import xyz.draumaz.kestrel.feature.feed.SectionHeader
 import xyz.draumaz.kestrel.feature.feed.TapGuard
 import xyz.draumaz.kestrel.nav.LocalNavigator
@@ -94,19 +96,21 @@ internal fun ProfileTab() {
     val anonymous = s?.anonymous ?: false
 
     Column(Modifier.fillMaxSize()) {
+        // Lined up with Home's title row (#153): it sits in the feed's 7dp inset, its ☰
+        // nudged 3dp out, 10dp down without the side bar.
+        val sideBar = LocalSideBar.current != null
         Row(
-            Modifier.fillMaxWidth().padding(start = if (LocalSideBar.current != null) 4.dp else 16.dp, top = 8.dp, end = 4.dp),
+            Modifier.fillMaxWidth().padding(start = if (sideBar) 7.dp else 23.dp, top = if (sideBar) 8.dp else 10.dp, end = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            SideBarButton()
+            SideBarButton(Modifier.offset(x = (-3).dp))
             Text("Profile", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            if (!anonymous) {
-                IconButton(onClick = { scope.launch { showAccountSheet(username, context) } }) {
-                    Icon(Icons.Rounded.PeopleAlt, "Switch / add account")
-                }
+            if (anonymous || username.isEmpty()) {
+                // The side bar always has Settings (#138).
+                if (LocalSideBar.current == null) SettingsButton()
+            } else {
+                YourStuffMenu()
             }
-            // The side bar always has Settings (#138).
-            if (LocalSideBar.current == null) SettingsButton()
         }
         if (anonymous || username.isEmpty()) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 130.dp)) {
@@ -127,46 +131,36 @@ internal fun ProfileTab() {
                 }
             }
         } else {
-            UserProfileBody(username, Modifier.weight(1f), app.feed.tabReselect(3)) { YourStuffRow() }
+            // A drag from the start edge opens the side bar, following the finger, not the next list (#158).
+            SideBarEdge(Modifier.weight(1f)) {
+                UserProfileBody(username, Modifier.fillMaxSize(), app.feed.tabReselect(3)) { scope.launch { showAccountSheet(username, context) } }
+            }
         }
     }
 }
 
 /**
- * History, Read later, Drafts, Summaries and saved search, as one row of chips.
- * With the side bar on, the ones it already shows are left out (#139).
+ * The ⋯ menu (#144): History, Read later, Drafts, Summaries and saved search, and
+ * Settings. With the side bar on, the ones it already shows are left out (#139);
+ * it always has Settings (#138).
  */
 @Composable
-private fun YourStuffRow() {
+private fun YourStuffMenu() {
     val nav = LocalNavigator.current
-    val cs = MaterialTheme.colorScheme
     val changes by app.drafts.changes.collectAsStateWithLifecycle()
     val drafts = remember(changes) { app.drafts.list().size }
     val settings by app.settings.state.collectAsStateWithLifecycle()
-    val inSideBar = if (LocalSideBar.current == null) emptySet() else settings.sideBarItems.filter { it.shown }.map { it.item }.toSet()
-    val chips = listOf(
-        Triple(Icons.Rounded.History, "History", Route.History) to SideBarItem.HISTORY,
-        Triple(Icons.Rounded.OfflinePin, "Read later", Route.Offline) to SideBarItem.OFFLINE,
-        Triple(Icons.Rounded.EditNote, if (drafts == 0) "Drafts" else "Drafts · $drafts", Route.Drafts) to SideBarItem.DRAFTS,
-        Triple(Icons.Rounded.AutoAwesome, "Summaries", Route.Summaries) to null,
-        Triple(Icons.Outlined.BookmarkBorder, "Search saved", Route.Saved) to SideBarItem.SAVED,
-    ).filter { it.second !in inSideBar }.map { it.first }
-    LazyRow(
-        Modifier.padding(bottom = 4.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(chips, key = { it.third.toString() }) { (icon, label, route) ->
-            AssistChip(
-                onClick = { nav.push(route) },
-                label = { Text(label) },
-                leadingIcon = { Icon(icon, null, Modifier.size(18.dp), tint = cs.onSecondaryContainer) },
-                shape = CircleShape,
-                border = null,
-                colors = AssistChipDefaults.assistChipColors(containerColor = cs.surfaceContainerHigh),
-            )
-        }
-    }
+    val sideBar = LocalSideBar.current != null
+    val inSideBar = if (!sideBar) emptySet() else settings.sideBarItems.filter { it.shown }.map { it.item }.toSet()
+    val actions = listOfNotNull(
+        MenuAction(Icons.Rounded.History, "History", half = true) { nav.push(Route.History) }.takeIf { SideBarItem.HISTORY !in inSideBar },
+        MenuAction(Icons.Rounded.OfflinePin, "Read later", half = true) { nav.push(Route.Offline) }.takeIf { SideBarItem.OFFLINE !in inSideBar },
+        MenuAction(Icons.Rounded.EditNote, if (drafts == 0) "Drafts" else "Drafts · $drafts", half = true) { nav.push(Route.Drafts) }.takeIf { SideBarItem.DRAFTS !in inSideBar },
+        MenuAction(Icons.Rounded.AutoAwesome, "Summaries", half = true) { nav.push(Route.Summaries) },
+        MenuAction(Icons.Outlined.BookmarkBorder, "Search saved", half = true) { nav.push(Route.Saved) }.takeIf { SideBarItem.SAVED !in inSideBar },
+        MenuAction(Icons.Outlined.Settings, "Settings", half = true) { nav.push(Route.Settings) }.takeIf { !sideBar },
+    )
+    IconButton(onClick = { showBarMenu(actions) }) { Icon(Icons.Rounded.MoreHoriz, "More") }
 }
 
 @Composable
@@ -221,6 +215,14 @@ private suspend fun showAccountSheet(current: String, context: android.content.C
         val cs = MaterialTheme.colorScheme
         val version by app.session.accountsVersion.collectAsStateWithLifecycle()
         val accounts by produceState(listOf(current), version) { value = app.session.accounts().ifEmpty { listOf(current) } }
+        // Each account's picture (#144), fetched once a run; a failed one is tried next time.
+        val icons by produceState(accountIcons.toMap(), accounts) {
+            for (a in accounts) {
+                if (a in accountIcons) continue
+                runCatching { app.repository.getUserAbout(a) }.onSuccess { accountIcons[a] = it.iconUrl }
+            }
+            value = accountIcons.toMap()
+        }
         // Removing another account confirms over the sheet (Cancel returns to it).
         val sheetScope = rememberCoroutineScope()
         ModalBottomSheet(onDismissRequest = { done(null) }) {
@@ -236,7 +238,7 @@ private suspend fun showAccountSheet(current: String, context: android.content.C
                         val isCurrent = a == current
                         Tile(
                             title = { Text("u/$a", color = if (isCurrent) cs.primary else Color.Unspecified) },
-                            leading = { LetterAvatar(a, 40.dp, cs.primaryContainer, cs.onPrimaryContainer) },
+                            leading = { LetterAvatar(a, 40.dp, cs.primaryContainer, cs.onPrimaryContainer, imageUrl = icons[a]) },
                             trailing = {
                                 if (isCurrent) {
                                     Icon(Icons.Rounded.CheckCircle, null, tint = cs.primary)
@@ -269,6 +271,9 @@ private suspend fun showAccountSheet(current: String, context: android.content.C
         AccountAction.Add -> addAccount(context)
     }
 }
+
+/** The accounts' pictures for the sheet, by name (null: none set). */
+private val accountIcons = mutableMapOf<String, String?>()
 
 private sealed interface AccountAction {
     data class Switch(val username: String) : AccountAction

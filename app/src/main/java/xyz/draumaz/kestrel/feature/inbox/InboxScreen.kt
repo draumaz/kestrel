@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.inbox
 
+import xyz.draumaz.kestrel.feature.home.LocalEdgeDrag
+import xyz.draumaz.kestrel.feature.home.SideBarEdge
 import xyz.draumaz.kestrel.feature.feed.FabScroll
 import xyz.draumaz.kestrel.feature.feed.CollapsingFab
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -74,6 +76,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -106,7 +110,7 @@ import kotlinx.coroutines.launch
 /** The Inbox tab. [reselect] bumps when the tab is re-tapped (scroll to top). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InboxScreen(reselect: Int) {
+fun InboxScreen(reselect: Int, selected: Boolean = true) {
     val nav = LocalNavigator.current
     val session by app.session.state.collectAsStateWithLifecycle()
     val anonymous = (session as? SessionState.LoggedIn)?.session?.anonymous == true
@@ -133,6 +137,21 @@ fun InboxScreen(reselect: Int) {
     val pager = rememberPagerState { tabs.size }
     val lists = tabs.map { rememberLazyListState() }
     val scope = rememberCoroutineScope()
+
+    // Opening Inbox reloads what's a minute old, and new mail (the badge going
+    // up) reloads it at once (#150): it used to wait for a pull.
+    val unread by app.inbox.unreadCount.collectAsStateWithLifecycle()
+    var lastUnread by remember { mutableIntStateOf(unread) }
+    var newMail by remember { mutableStateOf(false) }
+    LaunchedEffect(unread) {
+        if (unread > lastUnread) newMail = true
+        lastUnread = unread
+    }
+    LaunchedEffect(selected, newMail) {
+        if (!selected) return@LaunchedEffect
+        app.inbox.refreshStale(if (newMail) 0L else 60_000L)
+        newMail = false
+    }
 
     // Re-tapping the Inbox tab scrolls the current list to top.
     val initialReselect = remember { reselect }
@@ -166,7 +185,8 @@ fun InboxScreen(reselect: Int) {
                                 }
                             }
                         }) { Icon(Icons.Outlined.MarkEmailRead, "Mark all read") }
-                        SettingsButton()
+                        // The side bar always has Settings (#145).
+                        if (openSideBar == null) SettingsButton()
                     },
                 )
                 PrimaryScrollableTabRow(
@@ -196,25 +216,29 @@ fun InboxScreen(reselect: Int) {
             )
         },
     ) { padding ->
+        // A drag from the start edge goes to the side bar, which follows the finger (#158).
+        SideBarEdge(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding())) {
         HorizontalPager(
             pager,
-            Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).nestedScroll(fab),
+            Modifier.fillMaxSize().nestedScroll(fab),
             beyondViewportPageCount = 1,
+            userScrollEnabled = !LocalEdgeDrag.current.value,
         ) { page ->
             Box(if (openSideBar == null) Modifier else Modifier.pointerInput(rtl) {
                 // The side bar's own drag sits above the pager, which takes every
                 // sideways drag first, even on the first section where it can only
-                // stretch (#113). So a drag toward the side bar opens it: from the
-                // start edge before the rows see it (they'd mark read), and on the
-                // first section after them, so a row's swipe still wins there.
+                // stretch (#113). From the start edge the pager and rows step aside
+                // and the side bar's own drag follows the finger (SideBarEdge, #158);
+                // elsewhere on the first section, a drag toward it opens it after the
+                // rows have seen it, so a row's swipe still wins there.
                 val edge = 48.dp.toPx()
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     val fromEdge = if (rtl) down.position.x > size.width - edge else down.position.x < edge
-                    if (!fromEdge && pager.canScrollBackward) return@awaitEachGesture
-                    val pass = if (fromEdge) PointerEventPass.Initial else PointerEventPass.Main
+                    if (fromEdge || pager.canScrollBackward) return@awaitEachGesture
+                    val pass = PointerEventPass.Main
                     // The down's own Main pass: a row's tap has consumed it by then.
-                    if (pass == PointerEventPass.Main) awaitPointerEvent(pass)
+                    awaitPointerEvent(pass)
                     val slop = viewConfiguration.touchSlop
                     var total = Offset.Zero
                     var change: PointerInputChange
@@ -237,6 +261,7 @@ fun InboxScreen(reselect: Int) {
                 if (tabs[page].second == REDDIT_TAB) RedditNotificationsList(active = pager.currentPage == page, lists[page])
                 else InboxList(tabs[page].second, lists[page])
             }
+        }
         }
     }
 }
@@ -321,7 +346,16 @@ private fun InboxList(where: String, listState: LazyListState) {
                         Text("Nothing here", Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                     }
                 }
-                else -> LazyColumn(
+                else -> {
+                    // New items land above the first row, and the list kept its row in view, so
+                    // they were off screen (#150): a list at its top stays at its top. Read as the
+                    // new first item arrives, before the list lays it out.
+                    val firstKey = items.first().fullname
+                    val wasAtTop = remember(firstKey) {
+                        Snapshot.withoutReadObservation { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }
+                    }
+                    LaunchedEffect(firstKey) { if (wasAtTop) listState.scrollToItem(0) }
+                    LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 130.dp),
@@ -337,6 +371,7 @@ private fun InboxList(where: String, listState: LazyListState) {
                             }
                         }
                     }
+                }
                 }
             }
         }

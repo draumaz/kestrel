@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.outlined.PostAdd
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Arrangement
@@ -125,6 +126,29 @@ internal fun FrontpageTab(selected: Boolean) {
 
     // Full mode: Google-app style search bar with avatar.
     val actionRow: @Composable () -> Unit = {
+        if (!settings.fullBarNewPost && !settings.showApiUsage) {
+            // Without the New post button, Gmail's (#146): a fully round bar with "Search
+            // Reddit" in the middle, the ☰ and your picture beside it, outside (#164).
+            val cs = MaterialTheme.colorScheme
+            Row(
+                Modifier.fillMaxWidth().padding(start = if (LocalSideBar.current != null) 4.dp else 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SideBarButton()
+                Surface(
+                    Modifier.weight(1f).height(56.dp),
+                    shape = CircleShape,
+                    color = cs.surfaceContainerHigh,
+                ) {
+                    Box(Modifier.fillMaxSize().clickable(onClickLabel = "Search Reddit") { nav.push(Route.Search()) }, contentAlignment = Alignment.Center) {
+                        Text("Search Reddit", color = cs.onSurfaceVariant, fontSize = 16.sp, maxLines = 1)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                // The menu, without what's already in this bar (#78).
+                ProfileAvatar(username, 44.dp) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
+            }
+        } else {
             Row(
                 // With the ☰ here: the same spot as on the other tabs (#34).
                 Modifier.fillMaxWidth().padding(
@@ -150,6 +174,7 @@ internal fun FrontpageTab(selected: Boolean) {
                 // The menu, without what's already in this bar (#78).
                 ProfileAvatar(username, 44.dp) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
             }
+        }
     }
     // The title row: the bar itself in Expandable mode; Full mode scrolls it with the feed.
     val titleRow: @Composable () -> Unit = {

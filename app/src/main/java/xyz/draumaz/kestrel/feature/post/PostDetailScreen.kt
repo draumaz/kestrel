@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.post
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import xyz.draumaz.kestrel.state.LocalAuthorIcons
 import androidx.compose.animation.core.tween
@@ -199,7 +201,7 @@ import xyz.draumaz.kestrel.feature.feed.CalmGhost
 import xyz.draumaz.kestrel.feature.feed.CalmPill
 import xyz.draumaz.kestrel.feature.feed.CalmVoteGroup
 import xyz.draumaz.kestrel.feature.feed.LetterAvatar
-import xyz.draumaz.kestrel.feature.feed.avatarColor
+import xyz.draumaz.kestrel.feature.feed.avatarTones
 import xyz.draumaz.kestrel.model.Subreddit
 import xyz.draumaz.kestrel.settings.PostDisplay
 import xyz.draumaz.kestrel.settings.Settings
@@ -208,6 +210,7 @@ import xyz.draumaz.kestrel.state.PostOverrides
 import xyz.draumaz.kestrel.ui.Overlays
 import xyz.draumaz.kestrel.ui.friendlyError
 import xyz.draumaz.kestrel.ui.theme.LocalVoteColors
+import xyz.draumaz.kestrel.feature.feed.avatarColor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
@@ -719,9 +722,10 @@ private fun CommentList(
                 itemsIndexed(flat, key = { _, c -> c.fullname }, contentType = { _, c -> if (c.isMore) "more" else "comment" }) { i, c ->
                     val first = i == 0 || c.depth == 0
                     val last = i == flat.lastIndex || flat[i + 1].depth == 0
-                    CalmThreadRow(first, last, highlighted = currentMatchId == c.fullname) {
+                    val rails = CalmRails(c.depth, prev = if (i == 0) 0 else flat[i - 1].depth, next = if (i == flat.lastIndex) 0 else flat[i + 1].depth)
+                    CalmThreadRow(first, last, highlighted = currentMatchId == c.fullname, rails) {
                         if (c.isMore) {
-                            MoreRow(c, loading = c.fullname in thread.loadingMore, onClick = { actions.loadMore(c) })
+                            MoreRow(c, loading = c.fullname in thread.loadingMore, onClick = { actions.loadMore(c) }, start = calmIndent(c.depth) - 6.dp)
                         } else {
                             Column {
                                 CalmCommentRow(
@@ -1317,7 +1321,7 @@ private fun openMedia(p: Post, nav: AppNavigator) {
     when (p.type) {
         PostType.IMAGE -> nav.openImage(p.previewUrl ?: p.url, p.title)
         PostType.GIF -> if (p.gifMp4Url != null) {
-            nav.openVideo(p.gifMp4Url, p.title, downloadUrl = p.gifMp4Url, externalUrl = p.url)
+            nav.openVideo(p.gifMp4Url, p.title, downloadUrl = p.gifMp4Url, externalUrl = p.url, gif = true)
         } else {
             nav.openImage(p.url, p.title)
         }
@@ -1437,10 +1441,10 @@ private fun VotePill(score: Int, likes: Boolean?, onUp: () -> Unit, onDown: () -
 
 /** "Load more replies" node — a light indented row, not a card. */
 @Composable
-private fun MoreRow(c: Comment, loading: Boolean, onClick: () -> Unit) {
+private fun MoreRow(c: Comment, loading: Boolean, onClick: () -> Unit, start: Dp? = null) {
     val cs = MaterialTheme.colorScheme
     val indent = (c.depth.coerceIn(0, 6) * 8).dp
-    Box(Modifier.fillMaxWidth().padding(start = 10.dp + indent, end = 10.dp, bottom = 8.dp)) {
+    Box(Modifier.fillMaxWidth().padding(start = start ?: (10.dp + indent), end = 10.dp, bottom = 8.dp)) {
         TextButton(onClick = onClick, enabled = !loading) {
             if (loading) {
                 Loading(Modifier.size(24.dp), color = LocalContentColor.current)
@@ -1789,14 +1793,26 @@ private fun ColumnScope.CommentMenuItems(
 
 private val CalmRadius = 24.dp
 
+/** The rails' spacing (#166): each one this far from the last, the first this far from the container's edge. */
+private val CalmRailStep = 12.dp
+
+/** Where a Calm comment's text starts at [depth]: past its rails. */
+private fun calmIndent(depth: Int) = 16.dp + CalmRailStep * depth.coerceIn(0, 8)
+
+/** A row's rails: its [depth] and its neighbours', so each line runs on unbroken and has round ends where it starts and stops. */
+@Immutable
+private class CalmRails(val depth: Int, val prev: Int, val next: Int)
+
 /**
  * One row of a Calm thread container (surfaceContainerLow, radius 24, 12dp
  * side margin): [first] rounds the top and adds the container's top inset,
- * [last] rounds the bottom and leaves the 10dp gap to the next thread.
+ * [last] rounds the bottom and leaves the 10dp gap to the next thread. It
+ * draws the row's [rails]: one line per ancestor, joined row to row (#166).
  */
 @Composable
-private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, content: @Composable () -> Unit) {
+private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, rails: CalmRails, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val shape = RoundedCornerShape(
         topStart = if (first) CalmRadius else 0.dp,
         topEnd = if (first) CalmRadius else 0.dp,
@@ -1810,7 +1826,21 @@ private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, c
             .clip(shape)
             .background(xyz.draumaz.kestrel.feature.feed.calmCardColor())
             .padding(top = if (first) 6.dp else 0.dp, bottom = if (last) 6.dp else 0.dp)
-            .then(if (highlighted) Modifier.background(cs.primaryContainer) else Modifier),
+            .then(if (highlighted) Modifier.background(cs.primaryContainer) else Modifier)
+            // Drawn, not laid out (no extra layout pass per depth).
+            .drawBehind {
+                val w = 2.5.dp.toPx()
+                val inset = 6.dp.toPx() // where a line starts or stops, so its round end shows
+                for (l in 0 until rails.depth.coerceAtMost(8)) {
+                    val x = (CalmRailStep * (l + 1)).toPx()
+                    val cx = if (rtl) size.width - x else x
+                    // A line starts on its first reply and stops on the last one under it.
+                    val top = if (rails.prev <= l) inset else -w
+                    val bottom = if (rails.next <= l) size.height - inset else size.height + w
+                    // A soft colour per depth, as the cards style's edges (#166).
+                    drawLine(railColors[l % railColors.size], Offset(cx, top), Offset(cx, bottom), w, StrokeCap.Round)
+                }
+            },
     ) { content() }
 }
 
@@ -1842,8 +1872,6 @@ private fun CalmCommentRow(
         isOwn -> cs.primary
         else -> cs.onSurface
     }
-    val rail = cs.outlineVariant
-    val opRail = cs.primary.copy(alpha = 0.55f)
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val toggle = { actions.toggle(comment) }
     val up = comment.likes == true
@@ -1869,23 +1897,18 @@ private fun CalmCommentRow(
         Column(
             Modifier
                 .fillMaxWidth()
-                // Rails: drawn, not laid out (no extra layout pass per depth).
+                // The rails are the thread row's (CalmThreadRow); this marks your vote.
                 .drawBehind {
                     val w = 2.dp.toPx()
                     val top = 10.dp.toPx()
                     val bottom = size.height - 2.dp.toPx()
-                    for (l in 0 until depth) {
-                        val x = (16 + l * 10 + 4).dp.toPx()
-                        val color = if (isOp && l == depth - 1) opRail else rail
-                        drawRect(color, Offset(if (rtl) size.width - x - w else x, top), Size(w, (bottom - top).coerceAtLeast(0f)))
-                    }
                     if (voteEdge != null && !settings.voteGlow) {
                         val x = 6.dp.toPx() + w
                         drawRect(voteEdge, Offset(if (rtl) x - w else size.width - x, top), Size(w, (bottom - top).coerceAtLeast(0f)))
                     }
                 }
                 .voteGlow(voteEdge.takeIf { settings.voteGlow }, rtl, fadeTop = true)
-                .padding(start = (16 + depth * 10).dp, top = 10.dp, end = 16.dp, bottom = 8.dp),
+                .padding(start = calmIndent(depth), top = 10.dp, end = 16.dp, bottom = 8.dp),
         ) {
             Row(
                 Modifier
@@ -2129,12 +2152,13 @@ private fun CommentMedia(body: String, extra: List<android.net.Uri>, nav: AppNav
 private fun AuthorDot(name: String, size: Int) {
     val clean = name.removePrefix("u/")
     val deleted = clean.isEmpty() || clean.startsWith("[")
-    val color = if (deleted) MaterialTheme.colorScheme.outline else avatarColor(clean)
+    // Soft tones like the other placeholders (#168).
+    val (tone, onTone) = avatarTones(clean)
     val icon = if (deleted) null else LocalAuthorIcons.current[clean.lowercase()]
-    Box(Modifier.size(size.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size.dp).clip(CircleShape).background(if (deleted) MaterialTheme.colorScheme.outline else tone), contentAlignment = Alignment.Center) {
         Text(
             if (deleted) "?" else clean.first().uppercase(),
-            color = Color.White,
+            color = if (deleted) Color.White else onTone,
             fontWeight = FontWeight.Bold,
             fontSize = (size * 0.5f).sp,
             lineHeight = (size * 0.5f).sp,
