@@ -404,8 +404,18 @@ private fun AppRoot(pendingLink: MutableStateFlow<Uri?>) {
             Box(if (split?.hinge == true) split.endPane else Modifier.fillMaxSize()) {
                 MediaViewerHost(viewers)
             }
-            CompositionLocalProvider(LocalInEndPane provides (split != null && navigator.threadPaneActive)) {
-                OverlayHost()
+            // Overlays drawn in place (the top bar's ⋯ panel) cover only the pane in use, so they
+            // never run across the hinge; sheets and dialogs are windows of their own, which
+            // PaneOverlays moves onto the same screen.
+            val overlayInEnd = split != null && navigator.threadPaneActive
+            Box(
+                when {
+                    split == null -> Modifier.fillMaxSize()
+                    overlayInEnd -> split.endPane.paneInsets(split, end = true)
+                    else -> split.startPane.paneInsets(split, end = false)
+                },
+            ) {
+                CompositionLocalProvider(LocalInEndPane provides overlayInEnd) { OverlayHost() }
             }
             // Snackbars in the main pane, above its floating nav.
             Box(split?.startPane ?: Modifier.fillMaxSize()) {
