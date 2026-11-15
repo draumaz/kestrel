@@ -1,0 +1,6 @@
+# Kestrel's own code, compiled ahead of time on install (the libraries bring their own
+# profiles). Without it the app runs interpreted until the JIT catches up, which shows up as
+# jank the first times a feed or thread scrolls after every install and update. The whole
+# package: startup, feeds, threads and media are all hot paths in a Reddit client.
+HSPLxyz/draumaz/kestrel/**->**(**)**
+Lxyz/draumaz/kestrel/**;

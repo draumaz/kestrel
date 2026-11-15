@@ -102,6 +102,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavGraphBuilder
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -178,6 +180,13 @@ class KestrelActivity : ComponentActivity() {
         setContent {
             val settings by app.settings.state.collectAsStateWithLifecycle()
             KestrelTheme(settings) { AppRoot(pendingLink) }
+            // Once Compose has drawn, its root Surface covers the whole window: the window's own
+            // background would only be painted underneath it, a full screen of overdraw a frame.
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                withFrameNanos { }
+                window.setBackgroundDrawable(null)
+            }
         }
     }
 
@@ -389,14 +398,14 @@ private fun AppRoot(pendingLink: MutableStateFlow<Uri?>) {
             // Always this one Box, split or not, so spanning never recreates the app's pages.
             Box(
                 (split?.startPane ?: Modifier.fillMaxSize())
-                    .then(if (split != null) Modifier.unfoldStart(unfold).paneInsets(split, end = false) else Modifier)
+                    .then(if (split != null) Modifier.unfoldStart(unfold) { navigator.threadPaneActive }.paneInsets(split, end = false) else Modifier)
                     .notePane(navigator, end = false),
             ) {
                 PaneBack(enabled = !threadTakesBack) { AppNavHost(controller, start) }
             }
             if (split != null) {
                 PaneBack(enabled = threadTakesBack) {
-                    ThreadPane(split, navigator, viewers, detailThreads, Modifier.unfoldEnd(unfold))
+                    ThreadPane(split, navigator, viewers, detailThreads, Modifier.unfoldEnd(unfold) { !navigator.threadPaneActive })
                 }
             }
             // Media viewers: a transparent overlay above the current screen. Across a hinge, on
@@ -628,7 +637,11 @@ private fun searchOut(easing: Easing) =
 private inline fun <reified T : Route> NavGraphBuilder.screen(
     noinline content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit,
 ) = composable<T> { entry ->
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    // Opaque only while sliding in or out (or scrubbed by a back gesture): at rest the root
+    // Surface beneath is the same colour, and painting it twice is a screen of overdraw a frame.
+    val surface = MaterialTheme.colorScheme.surface
+    val transition = transition
+    Box(Modifier.fillMaxSize().drawBehind { if (transition.isRunning || transition.currentState != transition.targetState) drawRect(surface) }) {
         // Opened from the side bar (#111): one of its destinations, with the side bar over it.
         val sideBarRoute = remember(entry) { if (entry.savedStateHandle.get<Boolean>(SIDE_BAR_PAGE) == true) entry.toRoute<T>() else null }
         if (sideBarRoute != null) SideBarPage(sideBarRoute) { content(entry) } else content(entry)

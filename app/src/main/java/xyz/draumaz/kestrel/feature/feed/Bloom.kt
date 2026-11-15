@@ -150,13 +150,19 @@ fun feedDecodeWidth(): Int {
     return remember(density, widthDp) { (widthDp * density.density).toInt().coerceAtLeast(1) }
 }
 
-/** A Coil request for [url] decoded at most [widthPx] wide (never upscaled). */
+/**
+ * A Coil request for [url] decoded at most [widthPx] wide (never upscaled). INEXACT is what keeps
+ * it from upscaling: Coil's default, EXACT, scales every image to the requested width, so a 640px
+ * mid-res preview became a 1350px bitmap on the Duo (four times the memory, and a slow scaling
+ * pass on every decode) for no gain, since drawing scales it to the card just as well.
+ */
 @Composable
 fun rememberSizedRequest(url: String?, widthPx: Int): ImageRequest? {
     val context = androidx.compose.ui.platform.LocalContext.current
     return remember(url, widthPx) {
         url?.let {
-            ImageRequest.Builder(context).data(it).size(Size(Dimension(widthPx), Dimension.Undefined)).build()
+            ImageRequest.Builder(context).data(it).size(Size(Dimension(widthPx), Dimension.Undefined))
+                .precision(coil3.size.Precision.INEXACT).build()
         }
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
@@ -199,8 +200,16 @@ fun rememberUnfold(split: PaneSplit?): () -> Float {
     return remember(unfold) { { unfold.value } }
 }
 
-/** The start pane, hinged on its trailing edge: tips back a little. */
-fun Modifier.unfoldStart(unfold: () -> Float): Modifier = graphicsLayer {
+/*
+ * Compose draws the whole window as one View, so every frame of one pane (a scroll, a ripple)
+ * redraws the other as well. The pane not in use is kept as an offscreen layer instead: drawn
+ * once into a texture and then just copied, until something in it changes. On the Duo that's
+ * half of a 2784×1800 window that no longer paints its backgrounds, cards and text every frame.
+ */
+
+/** The start pane, hinged on its trailing edge: tips back a little. [cached]: not in use. */
+fun Modifier.unfoldStart(unfold: () -> Float, cached: () -> Boolean): Modifier = graphicsLayer {
+    compositingStrategy = if (cached()) CompositingStrategy.Offscreen else CompositingStrategy.Auto
     val p = unfold()
     if (p != 1f) {
         rotationY = -(1f - p) * 28f
@@ -210,8 +219,9 @@ fun Modifier.unfoldStart(unfold: () -> Float): Modifier = graphicsLayer {
     }
 }
 
-/** The end pane, hinged on its leading edge: swings in from edge-on. */
-fun Modifier.unfoldEnd(unfold: () -> Float): Modifier = graphicsLayer {
+/** The end pane, hinged on its leading edge: swings in from edge-on. [cached]: not in use. */
+fun Modifier.unfoldEnd(unfold: () -> Float, cached: () -> Boolean): Modifier = graphicsLayer {
+    compositingStrategy = if (cached()) CompositingStrategy.Offscreen else CompositingStrategy.Auto
     val p = unfold()
     if (p != 1f) {
         rotationY = (1f - p) * 92f
@@ -251,3 +261,11 @@ fun paneSize(): androidx.compose.ui.unit.DpSize {
     val along = if (LocalInEndPane.current) split.end else split.start
     return if (split.stacked) window.copy(height = along) else window.copy(width = along)
 }
+
+/**
+ * A page's own fill: [color], or transparent when it's the root Surface's colour, already painted
+ * underneath (KestrelActivity). Painting it again is a whole screen of overdraw every frame.
+ */
+@Composable
+fun pageFill(color: androidx.compose.ui.graphics.Color = androidx.compose.material3.MaterialTheme.colorScheme.background): androidx.compose.ui.graphics.Color =
+    if (color == androidx.compose.material3.MaterialTheme.colorScheme.surface) androidx.compose.ui.graphics.Color.Transparent else color

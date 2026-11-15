@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.home
 
 import androidx.compose.material.icons.rounded.Star
+import xyz.draumaz.kestrel.ui.pageFill
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.outlined.Schedule
@@ -317,7 +318,7 @@ fun HomeScreen() {
     SideBarDrawer(drawer, sideBar, selected = index, current = null, unread = unread, onTab = ::selectTab) {
     // The tabs' floating buttons follow the nav down as it hides (aboveFloatingNav).
     CompositionLocalProvider(LocalNavHidden provides navHidden.takeIf { bottomBar }) {
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+    Box(Modifier.fillMaxSize().background(pageFill(MaterialTheme.colorScheme.surface))) {
         KeepAliveTabs(
             selected = index,
             count = 4,

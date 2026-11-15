@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
 import xyz.draumaz.kestrel.ui.SearchIcon
+import xyz.draumaz.kestrel.ui.pageFill
 import xyz.draumaz.kestrel.ui.subredditName
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.FilledTonalToggleButton
@@ -152,7 +153,7 @@ fun SubredditScreen(name: String) {
                 onHideRead = { hideReadRequests++ },
             )
         },
-        containerColor = MaterialTheme.colorScheme.surface,
+        containerColor = pageFill(MaterialTheme.colorScheme.surface),
     ) { padding ->
         Box(Modifier.fillMaxSize().clipToBounds().nestedScroll(bar).nestedScroll(fab)) {
             // "Hide NSFW posts" would leave an NSFW subreddit's page empty: say why instead (#94).

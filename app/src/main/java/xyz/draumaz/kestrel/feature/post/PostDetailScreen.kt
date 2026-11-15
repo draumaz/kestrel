@@ -1,6 +1,7 @@
 package xyz.draumaz.kestrel.feature.post
 
 import androidx.compose.runtime.Immutable
+import xyz.draumaz.kestrel.ui.pageFill
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import xyz.draumaz.kestrel.state.LocalAuthorIcons
@@ -441,6 +442,7 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
                 )
             }
         },
+        containerColor = pageFill(),
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding()).nestedScroll(fab)) {
             when {
