@@ -1,5 +1,6 @@
 package xyz.draumaz.kestrel.feature.home
 
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.rounded.Star
 import xyz.draumaz.kestrel.ui.pageFill
 import androidx.compose.material.icons.rounded.Settings
@@ -134,6 +135,7 @@ import xyz.draumaz.kestrel.feature.inbox.InboxScreen
 import xyz.draumaz.kestrel.nav.LocalNavigator
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.ui.Overlays
+import xyz.draumaz.kestrel.feature.media.findActivity
 
 /** Prefs flag: have we shown the one-time notifications suggestion? */
 private const val NOTIF_PROMPTED_PREF = "notifyInboxPrompted"
@@ -201,12 +203,17 @@ fun HomeScreen() {
     // Flutter's UserScrollNotification handling: decide when the user's
     // drag direction changes and when scrolling settles (a fling landing);
     // near the top (≤ 4px) or overscrolling, always show.
-    val scrollConnection = remember {
+    // It turns once the finger has gone 48dp one way, as the floating buttons do (#191,
+    // #177), not on the first nudge: the two move together.
+    val turnAfter = with(LocalDensity.current) { 48.dp.toPx() }
+    val scrollConnection = remember(turnAfter) {
         object : NestedScrollConnection {
             // How far each tab's list is from its top, tracked from the
             // scroll deltas (lists start at the top; null = unknown).
             val fromTop = arrayOfNulls<Float>(4).apply { fill(0f) }
             var direction = 0 // last user direction: -1 down the list, 1 up, 0 idle
+            var travelDir = 0 // the way the finger is going now, and how far it has gone
+            var travel = 0f
 
             fun nearTop() = (fromTop[index] ?: Float.MAX_VALUE) <= 4f
 
@@ -220,9 +227,14 @@ fun HomeScreen() {
             }
 
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput) {
-                    val dir = if (available.y < -1f) -1 else if (available.y > 1f) 1 else 0
-                    if (dir != 0 && dir != direction) {
+                if (source == NestedScrollSource.UserInput && available.y != 0f) {
+                    val dir = if (available.y < 0f) -1 else 1
+                    if (dir != travelDir) {
+                        travelDir = dir
+                        travel = 0f
+                    }
+                    travel += kotlin.math.abs(available.y)
+                    if (travel >= turnAfter && dir != direction) {
                         direction = dir
                         update(dir)
                     }
@@ -247,6 +259,8 @@ fun HomeScreen() {
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 // The scroll settled (drag released / fling landed).
                 direction = 0
+                travelDir = 0
+                travel = 0f
                 if (available.y > 0f) fromTop[index] = 0f
                 update(0)
                 return Velocity.Zero
@@ -254,7 +268,9 @@ fun HomeScreen() {
         }
     }
 
-    // Back never leaves the app from here. With the side bar on: to the top of
+    // Back never leaves the app from here, unless "Back leaves the app" is on
+    // (#206): then it leaves once there's nothing else to do (instead of
+    // opening the side bar, or doing nothing). With the side bar on: to the top of
     // the page, then to Posts (#70), then it opens the side bar (so the edge
     // swipe that gesture navigation keeps for Back still brings it out; Back
     // again closes it). Otherwise,
@@ -274,15 +290,21 @@ fun HomeScreen() {
             } else if (index != 0) {
                 index = 0
                 chrome = true
+            } else if (app.settings.value.backLeavesApp) {
+                context.findActivity()?.moveTaskToBack(true)
             } else {
                 shellScope.launch { drawer.open() }
             }
         } else if (index != 0) {
             index = 0
             chrome = true
-        } else if (app.settings.value.backScrollsToTop) {
+        } else if (app.settings.value.backScrollsToTop && !(app.settings.value.backLeavesApp && scrollConnection.nearTop())) {
             app.feed.frontpageBackSignal.value++
+            scrollConnection.fromTop[index] = 0f // that scroll isn't seen by the connection
             chrome = true
+        } else if (app.settings.value.backLeavesApp) {
+            // Like the system's own back on a launcher activity: to the background, state kept.
+            context.findActivity()?.moveTaskToBack(true)
         }
     }
 

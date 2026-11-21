@@ -5,6 +5,21 @@ import xyz.draumaz.kestrel.settings.TopBarMode
 import xyz.draumaz.kestrel.feature.feed.HidingTopBar
 import xyz.draumaz.kestrel.feature.feed.rememberHidingBar
 import xyz.draumaz.kestrel.feature.feed.rememberSizedRequest
+import androidx.compose.material3.LocalContentColor
+import xyz.draumaz.kestrel.feature.feed.calmSegmentShape
+import xyz.draumaz.kestrel.ui.popOn
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.ripple
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
 import coil3.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -17,6 +32,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.lazy.itemsIndexed
 import xyz.draumaz.kestrel.settings.ExploreSection
+import androidx.compose.material3.carousel.CarouselDefaults
+import androidx.compose.material3.carousel.HorizontalMultiBrowseCarousel
+import androidx.compose.material3.carousel.rememberCarouselState
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -62,7 +81,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.DynamicFeed
 import androidx.compose.material.icons.rounded.FilterList
@@ -264,30 +282,40 @@ internal fun ExploreTab() {
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(top = barHeight, bottom = 130.dp)) {
             // The sections in Settings' order (#161). Popular & All and Custom feeds can go
             // anywhere; the filter sits above the first list of your communities.
-            fun LazyListScope.popular() {
-                item(key = "popular") {
-                    // A connected pair (#35): round outer corners, tight inner ones.
+            // Popular and All are sections of their own (#171): next to each other they're a
+            // connected pair (#35), round outer corners and tight inner ones; apart, a button each.
+            val shown = settings.exploreSections.filter { it.shown }.map { it.section }
+            val paired = shown.indexOf(ExploreSection.ALL).let { it > 0 && shown[it - 1] == ExploreSection.POPULAR }
+            fun LazyListScope.feeds(popular: Boolean, all: Boolean) {
+                item(key = if (popular) "popular" else "all") {
                     Row(Modifier.padding(start = 12.dp, top = 12.dp, end = 12.dp)) {
-                        OutlinedButton(
-                            onClick = { nav.openSubreddit("popular") },
-                            modifier = Modifier.weight(1f).defaultMinSize(minHeight = 52.dp),
-                            shape = connectedShapes(0, 2).shape,
-                        ) {
-                            Icon(Icons.Rounded.LocalFireDepartment, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Popular")
+                        val count = if (popular && all) 2 else 1
+                        val first = if (count == 1) CircleShape else connectedShapes(0, 2).shape
+                        val last = if (count == 1) CircleShape else connectedShapes(1, 2).shape
+                        if (popular) {
+                            OutlinedButton(
+                                onClick = { nav.openSubreddit("popular") },
+                                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 52.dp),
+                                shape = first,
+                            ) {
+                                Icon(Icons.Rounded.LocalFireDepartment, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Popular")
+                            }
                         }
-                        Spacer(Modifier.width(ConnectedGap))
-                        // With the Posts tab on r/all (Settings), this one opens the frontpage instead.
-                        val postsAll = settings.postsTabAll
-                        OutlinedButton(
-                            onClick = { if (postsAll) nav.push(Route.Frontpage) else nav.openSubreddit("all") },
-                            modifier = Modifier.weight(1f).defaultMinSize(minHeight = 52.dp),
-                            shape = connectedShapes(1, 2).shape,
-                        ) {
-                            Icon(if (postsAll) Icons.Rounded.Home else Icons.Rounded.Public, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text(if (postsAll) "Frontpage" else "All")
+                        if (count == 2) Spacer(Modifier.width(ConnectedGap))
+                        if (all) {
+                            // With the Posts tab on r/all (Settings), this one opens the frontpage instead.
+                            val postsAll = settings.postsTabAll
+                            OutlinedButton(
+                                onClick = { if (postsAll) nav.push(Route.Frontpage) else nav.openSubreddit("all") },
+                                modifier = Modifier.weight(1f).defaultMinSize(minHeight = 52.dp),
+                                shape = last,
+                            ) {
+                                Icon(if (postsAll) Icons.Rounded.Home else Icons.Rounded.Public, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (postsAll) "Frontpage" else "All")
+                            }
                         }
                     }
                 }
@@ -343,7 +371,8 @@ internal fun ExploreTab() {
             }
             fun LazyListScope.place(section: ExploreSection) {
                 when (section) {
-                    ExploreSection.POPULAR -> popular()
+                    ExploreSection.POPULAR -> feeds(popular = true, all = paired)
+                    ExploreSection.ALL -> if (!paired) feeds(popular = false, all = true)
                     ExploreSection.CUSTOM_FEEDS -> customFeeds()
                     // The ones you haven't joined, up to 10.
                     ExploreSection.POPULAR_COMMUNITIES -> {
@@ -375,16 +404,42 @@ internal fun ExploreTab() {
                 }
             }
             item(key = "filter") {
-                Row(Modifier.padding(start = 16.dp, top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    PillTextField(
+                // One connected group, as calm style's votes (#170): the field, whose filter
+                // icon opens the sort (no second, look-alike button), and Favorites only
+                // attached at its end, morphing as the vote buttons do.
+                Row(Modifier.padding(start = 16.dp, top = 12.dp, end = 16.dp).height(IntrinsicSize.Min)) {
+                    TextField(
                         value = query,
                         onValueChange = { query = it },
-                        placeholder = "Filter your communities",
-                        leading = Icons.Rounded.FilterList,
                         modifier = Modifier.weight(1f),
+                        placeholder = { Text("Filter your communities", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { SortMenu(sort) { sort = it } },
+                        singleLine = true,
+                        shape = RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp, topEnd = 6.dp, bottomEnd = 6.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = cs.surfaceContainerHigh,
+                            unfocusedContainerColor = cs.surfaceContainerHigh,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
                     )
-                    ToggleIcon(favOnly, { favOnly = it }, Icons.Rounded.Star, Icons.Rounded.StarBorder, "Favorites only", tonal = true)
-                    SortMenu(sort) { sort = it }
+                    Spacer(Modifier.width(3.dp))
+                    val interaction = remember { MutableInteractionSource() }
+                    val bg by animateColorAsState(if (favOnly) cs.primary else cs.surfaceContainerHigh, label = "favBg")
+                    val fg by animateColorAsState(if (favOnly) cs.onPrimary else cs.onSurfaceVariant, label = "favFg")
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .width(56.dp)
+                            .clip(calmSegmentShape(6.dp, 28.dp, 28.dp, favOnly, interaction))
+                            .background(bg)
+                            .toggleable(favOnly, interaction, ripple(), role = Role.Switch) { favOnly = it },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(if (favOnly) Icons.Rounded.Star else Icons.Rounded.StarBorder, "Favorites only", Modifier.popOn(favOnly), tint = fg)
+                    }
                 }
             }
             when (val s = subs) {
@@ -454,16 +509,8 @@ internal fun ExploreTab() {
                 if (!sideBar) SettingsButton()
             }
         } else {
-            // Exactly where the search screen's field is (#115): as tall, as far down,
-            // as far from either edge (after the ☰, where its ← is).
-            Row(
-                Modifier.fillMaxWidth().padding(start = if (sideBar) 4.dp else 16.dp, top = 4.dp, end = 24.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SideBarButton()
-                if (sideBar) Spacer(Modifier.width(4.dp))
-                SearchPill("Search communities & posts", onClick = { nav.push(Route.Search()) }, modifier = Modifier.weight(1f))
-            }
+            // Home's Full bar (#172): your picture opens its menu, less Browse media (a feed's).
+            FullTopBar(currentUser()) { showFloatingToolbar(nav, currentUser(), null, compact = true) }
         }
     }
     }
@@ -481,6 +528,20 @@ private fun Modifier.inSection(first: Boolean, last: Boolean): Modifier {
         .clip(RoundedCornerShape(if (first) r else 0.dp, if (first) r else 0.dp, if (last) r else 0.dp, if (last) r else 0.dp))
         .background(MaterialTheme.colorScheme.surfaceContainerLow)
         .padding(bottom = if (last) 8.dp else 0.dp)
+}
+
+/**
+ * A row of a list in Explore (#170): a segment of its own, 2dp from the next, its outer
+ * corners round only where the list starts or ends, as History's and Settings' rows.
+ */
+@Composable
+private fun Modifier.segment(first: Boolean, last: Boolean): Modifier {
+    val top = if (first) 24.dp else 4.dp
+    val bottom = if (last) 24.dp else 4.dp
+    return padding(start = 12.dp, end = 12.dp, bottom = if (last) 0.dp else 2.dp)
+        .fillMaxWidth()
+        .clip(RoundedCornerShape(top, top, bottom, bottom))
+        .background(MaterialTheme.colorScheme.surfaceContainerLow)
 }
 
 private fun currentUser(): String = app.session.username
@@ -508,25 +569,58 @@ private fun LazyListScope.subscriptionSections(
 ) {
     val q = query.trim().lowercase()
     val active = q.isNotEmpty() || favOnly || sort != "default"
-    // Each list is a container of its own (#162): its header, then its rows.
+    // Each list sits under its header, a segment per row (#170), as History's days.
     fun header(key: String, title: String) = item(key = "h_$key") {
-        SectionHeader(title, Modifier.inSection(first = true, last = false).padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 6.dp))
+        SectionHeader(title, Modifier.padding(start = 28.dp, top = 20.dp, end = 16.dp, bottom = 8.dp))
     }
     fun rows(section: String, subs: List<Subreddit>) =
         itemsIndexed(subs, key = { _, it -> "${section}_${it.name}" }, contentType = { _, _ -> "sub" }) { i, sub ->
-            Box(Modifier.inSection(first = false, last = i == subs.lastIndex)) { SubredditRow(sub, onOpen, onStar) }
+            Box(Modifier.segment(first = i == 0, last = i == subs.lastIndex)) { SubredditRow(sub, onOpen, onStar) }
         }
     fun note(key: String, text: String) = item(key = key) {
-        Box(Modifier.inSection(first = false, last = true).padding(24.dp), contentAlignment = Alignment.Center) { Text(text) }
+        Box(Modifier.segment(first = true, last = true).padding(24.dp), contentAlignment = Alignment.Center) { Text(text) }
     }
 
     if (active) {
-        // Filtered/sorted flat view.
-        var working = list.filter { (q.isEmpty() || it.name.lowercase().contains(q)) && (!favOnly || it.userHasFavorited) }
-        if (sort == "name") working = working.sortedBy { it.name.lowercase() }
-        else if (sort == "subscribers") working = working.sortedByDescending { it.subscribers }
-        header("count", "${working.size} communities")
-        if (working.isEmpty()) note("nomatch", "No matches") else rows("all", working)
+        // The results under their own headers (#170), as History's days: your favorites,
+        // then (while typing) Recently visited ones, then the rest of your subscriptions.
+        // Each community once, where it's listed first.
+        fun sorted(l: List<Subreddit>) = when (sort) {
+            "name" -> l.sortedBy { it.name.lowercase() }
+            "subscribers" -> l.sortedByDescending { it.subscribers }
+            else -> l
+        }
+        val working = list.filter { (q.isEmpty() || it.name.lowercase().contains(q)) && (!favOnly || it.userHasFavorited) }
+        val favs = sorted(working.filter { it.userHasFavorited })
+        val favNames = favs.mapTo(HashSet()) { it.name.lowercase() }
+        val byName = list.associateBy { it.name.lowercase() }
+        val recent = if (q.isEmpty() || favOnly) emptyList() else sorted(
+            visited.filter { it.name.lowercase().contains(q) && it.name.lowercase() !in favNames }
+                .map { byName[it.name.lowercase()] ?: it.asSubreddit() },
+        )
+        val recentNames = recent.mapTo(HashSet()) { it.name.lowercase() }
+        val rest = sorted(working.filter { it.name.lowercase() !in favNames && it.name.lowercase() !in recentNames })
+        if (favs.isEmpty() && recent.isEmpty() && rest.isEmpty()) {
+            header("count", "No matches")
+            note("nomatch", "Nothing you've joined or visited lately has that name")
+            return
+        }
+        if (favs.isNotEmpty()) {
+            header("favs", "Favorites")
+            rows("favs", favs)
+        }
+        if (recent.isNotEmpty()) {
+            header("recent", "Recently visited")
+            itemsIndexed(recent, key = { _, it -> "recent_${it.name}" }, contentType = { _, _ -> "sub" }) { i, sub ->
+                Box(Modifier.segment(first = i == 0, last = i == recent.lastIndex)) {
+                    SubredditRow(sub, onOpen, if (sub.name.lowercase() in byName) onStar else null)
+                }
+            }
+        }
+        if (rest.isNotEmpty()) {
+            header("subs", "Subscriptions")
+            rows("all", rest)
+        }
         return
     }
 
@@ -547,19 +641,19 @@ private fun LazyListScope.subscriptionSections(
             val shown = if (folds && !recentAll) recent.take(3) else recent
             // "Clear" empties just this list; post history stays (History has its own clear).
             item(key = "h_recent") {
-                Row(Modifier.inSection(first = true, last = false).padding(start = 16.dp, top = 6.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(start = 28.dp, top = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     SectionHeader("Recently visited", Modifier.weight(1f))
                     TextButton(onClick = onClearRecent) { Text("Clear") }
                 }
             }
             // No star on ones you aren't subscribed to. Long-press: remove just this one (#123).
             itemsIndexed(shown, key = { _, it -> "recent_${it.name}" }, contentType = { _, _ -> "sub" }) { i, sub ->
-                Box(Modifier.inSection(first = false, last = !folds && i == shown.lastIndex)) {
+                Box(Modifier.segment(first = i == 0, last = !folds && i == shown.lastIndex)) {
                     SubredditRow(sub, onOpen, if (sub.name.lowercase() in byName) onStar else null, visits = visits[sub.name.lowercase()]) { onRemoveRecent(sub) }
                 }
             }
             if (folds) item(key = "recent_more") {
-                Box(Modifier.inSection(first = false, last = true).padding(horizontal = 8.dp)) {
+                Box(Modifier.segment(first = false, last = true).padding(horizontal = 8.dp)) {
                     TextButton(onClick = onRecentAll, Modifier.fillMaxWidth()) { Text(if (recentAll) "Show less" else "Show all ${recent.size}") }
                 }
             }
@@ -602,13 +696,30 @@ private fun LazyListScope.communityCarousel(key: String, title: String, subs: Li
     item(key = key, contentType = "carousel") {
         Column(Modifier.inSection(first = true, last = true)) {
             SectionHeader(title, Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 10.dp))
-            LazyRow(
+            // Moves as the post galleries do (#170): the cards narrow as they reach the edge.
+            // A carousel needs its height: the card's, at the text size in use.
+            val type = MaterialTheme.typography
+            val text = with(LocalDensity.current) { type.titleSmall.lineHeight.toDp() + type.bodySmall.lineHeight.toDp() }
+            val state = rememberCarouselState { subs.size }
+            HorizontalMultiBrowseCarousel(
+                state = state,
+                preferredItemWidth = 156.dp,
+                itemSpacing = 8.dp,
                 contentPadding = PaddingValues(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(subs, key = { it.name }) { sub -> CommunityCard(sub, onOpen, onJoin) }
+                flingBehavior = CarouselDefaults.multiBrowseFlingBehavior(state),
+                modifier = Modifier.fillMaxWidth().height(26.dp + 60.dp + 8.dp + text + 12.dp + if (onJoin != null) 50.dp else 0.dp),
+            ) { i ->
+                CommunityCard(
+                    subs[i], onOpen, onJoin,
+                    Modifier.fillMaxSize().maskClip(RoundedCornerShape(20.dp)),
+                    // The name and Join fade as a card narrows to a peek, where they'd be cut off.
+                    Modifier.graphicsLayer {
+                        val info = carouselItemDrawInfo
+                        alpha = if (info.maxSize <= 0f) 1f else ((info.size / info.maxSize - 0.75f) * 4f).coerceIn(0f, 1f)
+                    },
+                )
             }
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -618,16 +729,10 @@ private fun LazyListScope.communityCarousel(key: String, title: String, subs: Li
  * its picture over it, its name and members, and Join (not when signed out).
  */
 @Composable
-private fun CommunityCard(sub: Subreddit, onOpen: (Subreddit) -> Unit, onJoin: ((Subreddit) -> Unit)?) {
+private fun CommunityCard(sub: Subreddit, onOpen: (Subreddit) -> Unit, onJoin: ((Subreddit) -> Unit)?, modifier: Modifier, textModifier: Modifier) {
     val cs = MaterialTheme.colorScheme
     val card = cs.surfaceContainerHigh
-    Box(
-        Modifier
-            .width(156.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(card)
-            .clickable { onOpen(sub) },
-    ) {
+    Box(modifier.background(card).clickable { onOpen(sub) }) {
         Box(Modifier.fillMaxWidth().height(56.dp).background(cs.secondaryContainer)) {
             val px = with(LocalDensity.current) { 156.dp.roundToPx() }
             sub.bannerUrl?.let { AsyncImage(rememberSizedRequest(it, px), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
@@ -640,11 +745,13 @@ private fun CommunityCard(sub: Subreddit, onOpen: (Subreddit) -> Unit, onJoin: (
                 imageUrl = sub.iconUrl,
             )
             Spacer(Modifier.height(8.dp))
-            Text(subredditName(sub.namePrefixed), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text("${compactNumber(sub.subscribers)} members", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
-            if (onJoin != null) {
-                Spacer(Modifier.height(10.dp))
-                FilledTonalButton(onClick = { onJoin(sub) }) { Text("Join") }
+            Column(textModifier, horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(subredditName(sub.namePrefixed), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${compactNumber(sub.subscribers)} members", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1)
+                if (onJoin != null) {
+                    Spacer(Modifier.height(10.dp))
+                    FilledTonalButton(onClick = { onJoin(sub) }, Modifier.height(40.dp)) { Text("Join") }
+                }
             }
         }
     }
@@ -673,7 +780,10 @@ private fun FavoriteBubble(sub: Subreddit, onOpen: (Subreddit) -> Unit, onUnfavo
 private fun SortMenu(sort: String, onPick: (String) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { open = true }) { Icon(Icons.AutoMirrored.Rounded.Sort, "Sort") }
+        // Tinted while a sort other than the default is on.
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Rounded.FilterList, "Sort", tint = if (sort == "default") LocalContentColor.current else MaterialTheme.colorScheme.primary)
+        }
         PickOneMenu(open, { open = false }, listOf("default" to "Default", "name" to "Name A–Z", "subscribers" to "Most subscribers"), sort, onPick)
     }
 }

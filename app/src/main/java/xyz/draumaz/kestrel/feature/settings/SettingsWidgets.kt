@@ -4,9 +4,9 @@ package xyz.draumaz.kestrel.feature.settings
 
 import xyz.draumaz.kestrel.ui.switchThumb
 import xyz.draumaz.kestrel.ui.subredditName
+import xyz.draumaz.kestrel.feature.feed.MenuGroup
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.ui.semantics.Role
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import xyz.draumaz.kestrel.app
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -28,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import xyz.draumaz.kestrel.ui.AlertDialog
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import xyz.draumaz.kestrel.ui.ModalBottomSheet
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -184,29 +186,15 @@ internal class PickOption<T>(
 )
 
 /**
- * A single-choice sheet. [radio] = radio buttons (Flutter RadioListTile),
- * else a trailing check on the current one. Null when dismissed.
+ * A single-choice sheet, as every menu (#181): the options in one group, the current one a
+ * tinted pill with a check, each with its icon when it has one. Null when dismissed.
  */
-internal suspend fun <T> pickOption(options: List<PickOption<T>>, current: T?, radio: Boolean = true): T? =
+internal suspend fun <T> pickOption(options: List<PickOption<T>>, current: T?): T? =
     Overlays.show<PickOption<T>> { done ->
         OverlaySheet<PickOption<T>>(done) { close ->
-            for (o in options) {
-                val selected = o.value == current
-                ListItem(
-                    // Selectable rows: screen readers hear which one is current.
-                    modifier = Modifier.selectable(selected = selected, role = Role.RadioButton) { close(o) },
-                    colors = clearItem,
-                    leadingContent = if (radio) ({ RadioButton(selected = selected, onClick = null) }) else null,
-                    content = { Text(o.label) },
-                    supportingContent = o.subtitle?.let { { Text(it) } },
-                    trailingContent = when {
-                        !radio && selected -> ({ Icon(Icons.Rounded.Check, null) })
-                        radio && o.icon != null -> ({ Icon(o.icon, null) })
-                        else -> null
-                    },
-                )
+            MenuGroup {
+                for (o in options) item(o.label, o.icon, o.subtitle, selected = o.value == current) { close(o) }
             }
-            Spacer(Modifier.height(8.dp))
         }
     }?.value
 

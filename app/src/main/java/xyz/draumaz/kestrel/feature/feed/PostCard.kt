@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.RectangleShape
 import xyz.draumaz.kestrel.ui.subredditName
 import xyz.draumaz.kestrel.ui.LocalOpenThread
@@ -72,6 +74,7 @@ import xyz.draumaz.kestrel.feature.media.shareAsMedia
 import xyz.draumaz.kestrel.feature.media.canShareAsMedia
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Icon
@@ -369,18 +372,13 @@ fun PostCard(listed: Post, modifier: Modifier = Modifier, swipeOverride: Pair<Sw
 
     var outer: Modifier = modifier
     // For You impressions (shown-but-never-opened posts get demoted on the
-    // next build) and "mark read on scroll" both need to know what was seen.
-    // A card flung past mid-scroll wasn't really seen; counting it would bury
-    // posts the user never had a chance to read. Only a card that sits ≥60%
-    // visible for a second counts as shown.
-    if (reason != null || settings.markReadOnScroll) {
+    // next build) need to know what was seen. A card flung past mid-scroll
+    // wasn't really seen; counting it would bury posts the user never had a
+    // chance to read. Only a card that sits ≥60% visible for a second counts
+    // as shown. ("Mark read on scroll" is the list's: once scrolled past, #201.)
+    if (reason != null) {
         outer = outer.onVisibilityChanged(minDurationMs = 1000, minFractionVisible = 0.6f) { visible ->
-            if (!visible) return@onVisibilityChanged
-            if (post.feedReason != null) app.forYou.learner.impression(post)
-            // "Mark read on scroll": a card actually seen counts as read (history
-            // only — no interest learning, which is for real engagement).
-            val s = app.settings.value
-            if (s.markReadOnScroll && s.trackHistory) app.history.markViewed(post)
+            if (visible) app.forYou.learner.impression(post)
         }
     }
 
@@ -428,18 +426,31 @@ fun PostCard(listed: Post, modifier: Modifier = Modifier, swipeOverride: Pair<Sw
                 if (open) drawRoundRect(veil, cornerRadius = androidx.compose.ui.geometry.CornerRadius(28.dp.toPx()))
                 else if (veil.alpha > 0f) drawRect(veil)
             }
+            // Settings › Mark what you voted on: Glow marks the card too, as a comment (#173).
+            val ov by rememberOverride(post)
+            val likes = ov.let { if (it != null) it.likes else post.likes }
+            val glow = if (!settings.voteEdge || !settings.voteGlow) null else when (likes) {
+                true -> votes.up
+                false -> votes.down
+                null -> null
+            }
             CompositionLocalProvider(LocalReadTextDim provides (dimRead && settings.dimReadTextOnly)) {
                 when (settings.postDisplay) {
-                    PostDisplay.LARGE -> LargeCard(post, actions, settings, dim)
-                    PostDisplay.CARD -> CardsCard(post, actions, settings, dim)
-                    PostDisplay.MINI -> MiniCard(post, actions, settings, dim)
-                    PostDisplay.CALM -> CalmCard(post, actions, settings, dim)
-                    PostDisplay.CALM_CARDS -> CalmCardsCard(post, actions, settings, dim)
+                    PostDisplay.LARGE -> LargeCard(post, actions, settings, dim, glow)
+                    PostDisplay.CARD -> CardsCard(post, actions, settings, dim, glow)
+                    PostDisplay.MINI -> MiniCard(post, actions, settings, dim, glow)
+                    PostDisplay.CALM -> CalmCard(post, actions, settings, dim, glow)
+                    PostDisplay.CALM_CARDS -> CalmCardsCard(post, actions, settings, dim, glow)
                 }
             }
         }
     }
 }
+
+// Trending gets a fire icon instead of an emoji in the text (#208). Posts cached
+// before 2.0.91 still carry "🔥 Trending on Reddit", so the callers drop it.
+private fun reasonIcon(reason: String) =
+    if (reason.endsWith("Trending on Reddit")) Icons.Rounded.LocalFireDepartment else Icons.Outlined.Info
 
 @Composable
 private fun ReasonRow(reason: String, onTune: () -> Unit) {
@@ -451,10 +462,10 @@ private fun ReasonRow(reason: String, onTune: () -> Unit) {
             .padding(start = 18.dp, top = 2.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Icons.Outlined.Info, null, Modifier.size(13.dp), tint = cs.primary)
+        Icon(reasonIcon(reason), null, Modifier.size(13.dp), tint = cs.primary)
         Spacer(Modifier.width(6.dp))
         Text(
-            reason,
+            reason.removePrefix("🔥 "),
             Modifier.weight(1f),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -478,9 +489,9 @@ private fun ReasonRow(reason: String, onTune: () -> Unit) {
 private val TitleLineHeight = 1.25.em
 
 @Composable
-private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
+private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: Color?) {
     val cs = MaterialTheme.colorScheme
-    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune) {
+    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune, glow = glow) {
         Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 6.dp)) {
             Header(p, a, s)
             Spacer(Modifier.height(10.dp))
@@ -498,12 +509,12 @@ private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
             Spacer(Modifier.height(12.dp))
             Media(p, a, s)
             PollOptions(p)
-            if (p.snippet.isNotEmpty()) {
+            if (p.snippet.isNotEmpty()) SpoilerOr(p) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     p.snippet,
                     Modifier.readDim(),
-                        maxLines = 3,
+                        maxLines = s.textLines(3),
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
@@ -519,9 +530,9 @@ private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
  * shorter banner height so cards stay compact and scannable.
  */
 @Composable
-private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
+private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: Color?) {
     val cs = MaterialTheme.colorScheme
-    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune) {
+    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune, glow = glow) {
         Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 6.dp)) {
             Header(p, a, s)
             Spacer(Modifier.height(10.dp))
@@ -539,12 +550,12 @@ private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
             Spacer(Modifier.height(12.dp))
             BannerMedia(p, a, s, 180.dp)
             PollOptions(p)
-            if (p.snippet.isNotEmpty()) {
+            if (p.snippet.isNotEmpty()) SpoilerOr(p) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     p.snippet,
                     Modifier.readDim(),
-                        maxLines = 2,
+                        maxLines = s.textLines(2),
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
@@ -557,8 +568,8 @@ private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
 
 /** "Mini cards" — compact: header + title with a small side thumbnail, full action row below. */
 @Composable
-private fun MiniCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
-    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune) {
+private fun MiniCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: Color?) {
+    BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune, glow = glow) {
         Column(Modifier.padding(start = 14.dp, top = 12.dp, end = 6.dp, bottom = 4.dp)) {
             Header(p, a, s)
             Spacer(Modifier.height(8.dp))
@@ -767,7 +778,8 @@ internal fun rememberFlairText(flair: UserFlair): Pair<AnnotatedString, Map<Stri
             if (p.emojiUrl != null) {
                 val id = "e$i"
                 appendInlineContent(id, "□")
-                emoji[id] = InlineTextContent(Placeholder(14.sp, 14.sp, PlaceholderVerticalAlign.TextCenter)) {
+                // Big enough to make out (#193): Reddit's flair images are small.
+                emoji[id] = InlineTextContent(Placeholder(16.sp, 16.sp, PlaceholderVerticalAlign.TextCenter)) {
                     AsyncImage(p.emojiUrl, null, Modifier.fillMaxSize())
                 }
                 // Some flairs have no space of their own after the image.
@@ -1186,10 +1198,10 @@ private fun rememberCalmLive(p: Post): CalmLive {
  * Mark-read lives in the ⋮ sheet.
  */
 @Composable
-private fun CalmCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
+private fun CalmCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: Color?) {
     val live = rememberCalmLive(p)
     CompositionLocalProvider(LocalCalmOnCard provides true) {
-        BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune, shape = RoundedCornerShape(CalmOuter), color = calmCardColor()) {
+        BloomCard(dim, onClick = a::openDetail, onLongClick = a::tune, shape = RoundedCornerShape(CalmOuter), color = calmCardColor(), glow = glow) {
             Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 10.dp, bottom = 10.dp)) {
                 Column(Modifier.padding(end = 6.dp)) { CalmBody(p, a, s, CalmExpressiveMedia) }
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1207,7 +1219,7 @@ private fun CalmCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
  * (edge to edge) and the actions as separate segments, 3dp apart.
  */
 @Composable
-private fun CalmCardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
+private fun CalmCardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: Color?) {
     val live = rememberCalmLive(p)
     val color = calmCardColor()
     val hasMedia = p.type != PostType.SELF
@@ -1218,6 +1230,7 @@ private fun CalmCardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
                 onLongClick = a::tune,
                 shape = RoundedCornerShape(topStart = CalmOuter, topEnd = CalmOuter, bottomStart = CalmInner, bottomEnd = CalmInner),
                 color = color,
+                glow = glow, // the top segment's: the corner it glows from
             ) {
                 Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 10.dp, bottom = 14.dp)) {
                     Column(Modifier.padding(end = 6.dp)) { CalmBody(p, a, s, mediaShape = null) }
@@ -1242,6 +1255,37 @@ private fun CalmCardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier) {
     }
 }
 
+/** A spoiler post's text in a feed (#204): covered, as reddit.com's; a tap shows it. */
+@Composable
+private fun SpoilerOr(p: Post, content: @Composable () -> Unit) {
+    if (!p.spoiler) return content()
+    var shown by rememberSaveable(p.id) { mutableStateOf(false) }
+    if (shown) content() else SpoilerTextCover(Modifier.padding(top = 6.dp, end = 6.dp)) { shown = true }
+}
+
+/** Where a spoiler's text would be (#204): "Spoiler · tap to view", in its own rounded box. */
+@Composable
+internal fun SpoilerTextCover(modifier: Modifier = Modifier, onReveal: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cs.surfaceContainerHighest)
+            .clickable(onClickLabel = "Show spoiler", onClick = onReveal)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Outlined.VisibilityOff, null, Modifier.size(18.dp), tint = cs.onSurfaceVariant)
+        Spacer(Modifier.width(8.dp))
+        Text("Spoiler · tap to view", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+    }
+}
+
+/** How many lines of a post's text a card shows: Settings' choice (#186), else the layout's [own]. */
+private fun Settings.textLines(own: Int) = if (postTextLines > 0) postTextLines else own
+
 /** Header, title, flair, crosspost, media (when [mediaShape] is set), poll and selftext. */
 @Composable
 private fun CalmBody(p: Post, a: PostActions, s: Settings, mediaShape: androidx.compose.ui.graphics.Shape?) {
@@ -1264,11 +1308,11 @@ private fun CalmBody(p: Post, a: PostActions, s: Settings, mediaShape: androidx.
         Spacer(Modifier.height(10.dp))
         PollOptions(p)
     }
-    if (p.snippet.isNotEmpty()) {
+    if (p.snippet.isNotEmpty()) SpoilerOr(p) {
         Text(
             p.snippet,
             Modifier.padding(top = 6.dp).readDim(),
-            maxLines = 2,
+            maxLines = s.textLines(2),
             overflow = TextOverflow.Ellipsis,
             fontSize = 14.sp,
             color = cs.onSurfaceVariant,
@@ -1392,10 +1436,10 @@ private fun CalmHeader(p: Post, a: PostActions, s: Settings) {
                 // post's age (kept visible when the reason is long). Tap → the
                 // "why you're seeing this" / tune sheet.
                 Row(Modifier.clickable(onClick = a::tune), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Info, null, Modifier.size(13.dp), tint = cs.primary)
+                    Icon(reasonIcon(reason), null, Modifier.size(13.dp), tint = cs.primary)
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        reason,
+                        reason.removePrefix("🔥 "),
                         Modifier.weight(1f, fill = false),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
@@ -1652,7 +1696,7 @@ private fun CalmSegment(
  * its height) marks an outer corner, which stays round.
  */
 @Composable
-private fun calmSegmentShape(start: Dp, end: Dp, full: Dp, on: Boolean, interaction: InteractionSource): Shape {
+internal fun calmSegmentShape(start: Dp, end: Dp, full: Dp, on: Boolean, interaction: InteractionSource): Shape {
     val pressed by interaction.collectIsPressedAsState()
     val spec = MaterialTheme.motionScheme.fastSpatialSpec<Dp>()
     fun corner(c: Dp) = when {

@@ -3,6 +3,7 @@ package xyz.draumaz.kestrel.feature.feed
 import xyz.draumaz.kestrel.ui.SearchIcon
 import xyz.draumaz.kestrel.ui.pageFill
 import xyz.draumaz.kestrel.ui.subredditName
+import xyz.draumaz.kestrel.feature.markdown.RedditMarkdown
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.material3.FilledTonalToggleButton
 import xyz.draumaz.kestrel.ui.Loading
@@ -131,7 +132,7 @@ fun SubredditScreen(name: String) {
     val about by vm.about.collectAsStateWithLifecycle()
     val session by app.session.state.collectAsStateWithLifecycle()
     val anonymous = (session as? SessionState.LoggedIn)?.session?.anonymous != false
-    val fab = remember { FabScroll() }
+    val fab = rememberFabScroll()
     val settings by app.settings.state.collectAsStateWithLifecycle()
     val listState = rememberFeedListState()
     var refreshRequests by remember { mutableIntStateOf(0) } // the Refresh floating button
@@ -243,7 +244,8 @@ private fun SubredditHeader(s: Subreddit, vm: SubredditAboutViewModel) {
                 }
                 if (s.description.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    Text(s.description, color = cs.onSurfaceVariant)
+                    // Reddit text: its links open (#194).
+                    RedditMarkdown(s.description, color = cs.onSurfaceVariant)
                 }
             }
         }
@@ -273,7 +275,7 @@ private suspend fun showAbout(name: String, about: Subreddit?) {
                     OwnSort(name)
                     if (about != null && about.description.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
-                        Text(about.description)
+                        RedditMarkdown(about.description)
                     }
                     Spacer(Modifier.height(18.dp))
                     SectionHeader("Rules")
@@ -305,7 +307,7 @@ private fun RuleTile(index: Int, title: String, description: String) {
             Icon(if (open) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore, null)
         }
         AnimatedVisibility(open) {
-            if (description.isNotEmpty()) Text(description, Modifier.padding(bottom = 12.dp))
+            if (description.isNotEmpty()) RedditMarkdown(description, Modifier.padding(bottom = 12.dp))
         }
     }
 }

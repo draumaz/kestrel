@@ -8,6 +8,7 @@ import xyz.draumaz.kestrel.feature.feed.FabScroll
 import xyz.draumaz.kestrel.feature.feed.FeedFab
 import xyz.draumaz.kestrel.settings.HomeFab
 import xyz.draumaz.kestrel.settings.postsTabKey
+import xyz.draumaz.kestrel.feature.feed.rememberFabScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -117,7 +118,7 @@ internal fun FrontpageTab(selected: Boolean) {
     val scope = rememberCoroutineScope()
     val bar = rememberHidingBar(listState)
 
-    val fab = remember { FabScroll() }
+    val fab = rememberFabScroll()
     var refreshRequests by remember { mutableIntStateOf(0) } // the Refresh floating button
     var hideReadRequests by remember { mutableIntStateOf(0) } // the Hide read posts floating button
     // Reloading starts a new list from the top; returning to the tab shows the bar too.
@@ -126,55 +127,8 @@ internal fun FrontpageTab(selected: Boolean) {
 
     // Full mode: Google-app style search bar with avatar.
     val actionRow: @Composable () -> Unit = {
-        if (!settings.fullBarNewPost && !settings.showApiUsage) {
-            // Without the New post button, Gmail's (#146): a fully round bar with "Search
-            // Reddit" in the middle, the ☰ and your picture beside it, outside (#164).
-            val cs = MaterialTheme.colorScheme
-            Row(
-                Modifier.fillMaxWidth().padding(start = if (LocalSideBar.current != null) 4.dp else 16.dp, top = 4.dp, end = 16.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SideBarButton()
-                Surface(
-                    Modifier.weight(1f).height(56.dp),
-                    shape = CircleShape,
-                    color = cs.surfaceContainerHigh,
-                ) {
-                    Box(Modifier.fillMaxSize().clickable(onClickLabel = "Search Reddit") { nav.push(Route.Search()) }, contentAlignment = Alignment.Center) {
-                        Text("Search Reddit", color = cs.onSurfaceVariant, fontSize = 16.sp, maxLines = 1)
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-                // The menu, without what's already in this bar (#78).
-                ProfileAvatar(username, 44.dp) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
-            }
-        } else {
-            Row(
-                // With the ☰ here: the same spot as on the other tabs (#34).
-                Modifier.fillMaxWidth().padding(
-                    start = if (LocalSideBar.current != null) 4.dp else 16.dp,
-                    // In line with the search screen's bar.
-                    top = 4.dp,
-                    end = 16.dp,
-                    bottom = 4.dp,
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SideBarButton()
-                if (settings.showApiUsage) {
-                    ApiUsagePill(Modifier.weight(1f))
-                } else {
-                    SearchPill("Search Reddit", onClick = { nav.push(Route.Search()) }, modifier = Modifier.weight(1f))
-                }
-                if (settings.fullBarNewPost) {
-                    Spacer(Modifier.width(4.dp))
-                    NewPostButton { nav.push(Route.Submit()) }
-                }
-                Spacer(Modifier.width(8.dp))
-                // The menu, without what's already in this bar (#78).
-                ProfileAvatar(username, 44.dp) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
-            }
-        }
+        // The menu, without what's already in this bar (#78).
+        FullTopBar(username) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
     }
     // The title row: the bar itself in Expandable mode; Full mode scrolls it with the feed.
     val titleRow: @Composable () -> Unit = {
@@ -198,7 +152,7 @@ internal fun FrontpageTab(selected: Boolean) {
             if (!homeOn && forYou) {
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (blend) blendSubtitle(blendState) else "Personalized on your phone",
+                    if (blend) blendSubtitle(blendState) else "On your phone", // short, so it fits beside the title (#176)
                     Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -259,6 +213,83 @@ private fun NewPostButton(onClick: () -> Unit) {
     ) { Icon(Icons.Outlined.PostAdd, "New post", Modifier.size(22.dp)) }
 }
 
+/**
+ * The Full top bar, Home's and Explore's (#172): ☰, the search bar (or the API usage), New
+ * post if Settings has it there, and your picture, which opens [onAvatar].
+ */
+@Composable
+internal fun FullTopBar(username: String, onAvatar: () -> Unit) {
+    val settings by app.settings.state.collectAsStateWithLifecycle()
+    val nav = LocalNavigator.current
+    if (!settings.fullBarNewPost && !settings.showApiUsage) {
+        // Without the New post button, Gmail's (#146): a fully round bar with "Search
+        // Reddit" in the middle, the ☰ and your picture beside it, outside (#164).
+        RoundSearchBar(username, onAvatar)
+        return
+    }
+    Row(
+        // With the ☰ here: the same spot as on the other tabs (#34).
+        Modifier.fillMaxWidth().padding(
+            start = if (LocalSideBar.current != null) 4.dp else 16.dp,
+            // In line with the search screen's bar.
+            top = 4.dp,
+            end = if (LocalSideBar.current != null) 4.dp else 16.dp,
+            bottom = 4.dp,
+        ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SideBarButton()
+        if (settings.showApiUsage) {
+            ApiUsagePill(Modifier.weight(1f))
+        } else {
+            SearchPill("Search Reddit", onClick = { nav.push(Route.Search()) }, modifier = Modifier.weight(1f))
+        }
+        if (settings.fullBarNewPost) {
+            Spacer(Modifier.width(4.dp))
+            NewPostButton { nav.push(Route.Submit()) }
+        }
+        BarAvatar(username, onAvatar)
+    }
+}
+
+/** The Full bar as Gmail's (#146, #164): ☰, a fully round bar with "Search Reddit" in the middle, and your picture. */
+@Composable
+private fun RoundSearchBar(username: String, onAvatar: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val nav = LocalNavigator.current
+    val sideBar = LocalSideBar.current != null
+    Row(
+        Modifier.fillMaxWidth().padding(start = if (sideBar) 4.dp else 16.dp, top = 4.dp, end = if (sideBar) 4.dp else 16.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SideBarButton()
+        Surface(
+            Modifier.weight(1f).height(56.dp),
+            shape = CircleShape,
+            color = cs.surfaceContainerHigh,
+        ) {
+            Box(Modifier.fillMaxSize().clickable(onClickLabel = "Search Reddit") { nav.push(Route.Search()) }, contentAlignment = Alignment.Center) {
+                Text("Search Reddit", color = cs.onSurfaceVariant, fontSize = 16.sp, maxLines = 1)
+            }
+        }
+        BarAvatar(username, onAvatar)
+    }
+}
+
+/**
+ * Your picture at the Full bar's end. With the ☰ there it's small, as Gmail's, in a slot
+ * as wide as the ☰'s, so the bar between them sits in the middle (#172).
+ */
+@Composable
+private fun BarAvatar(username: String, onClick: () -> Unit) {
+    if (LocalSideBar.current != null) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { ProfileAvatar(username, 32.dp, onClick) }
+    } else {
+        Spacer(Modifier.width(8.dp))
+        ProfileAvatar(username, 44.dp, onClick)
+    }
+}
+
 @Composable
 private fun ProfileAvatar(username: String, size: Dp, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
@@ -301,7 +332,7 @@ private fun ApiUsagePill(modifier: Modifier = Modifier) {
  * display, profile) in from the top as a dismissible overlay — it never
  * displaces the feed.
  */
-private fun showFloatingToolbar(nav: AppNavigator, username: String, onBrowseMedia: () -> Unit, compact: Boolean = false) {
+internal fun showFloatingToolbar(nav: AppNavigator, username: String, onBrowseMedia: (() -> Unit)?, compact: Boolean = false) {
     showTopPanel { close ->
         ToolbarPanel(
             username,
@@ -310,7 +341,8 @@ private fun showFloatingToolbar(nav: AppNavigator, username: String, onBrowseMed
             onNewPost = { close { nav.push(Route.Submit()) } },
             onProfile = { close { nav.push(Route.User(username)) } },
             onSettings = { close { nav.push(Route.Settings) } },
-            onBrowseMedia = { close(onBrowseMedia) },
+            // Only a feed has media to browse: not on Explore (#172).
+            onBrowseMedia = onBrowseMedia?.let { { close(it) } },
         )
     }
 }
@@ -330,7 +362,7 @@ private fun ToolbarPanel(
     onNewPost: () -> Unit,
     onProfile: () -> Unit,
     onSettings: () -> Unit,
-    onBrowseMedia: () -> Unit,
+    onBrowseMedia: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
     val settings by app.settings.state.collectAsStateWithLifecycle()
@@ -340,7 +372,7 @@ private fun ToolbarPanel(
     val signedIn = app.session.session?.anonymous == false
     val rows = mutableListOf<MutableList<TopBarMenuItem>>()
     for (e in settings.topBarMenu(if (compact) TopBarMode.FULL else TopBarMode.EXPANDABLE)) {
-        if (!e.shown || (e.item == TopBarMenuItem.PROFILE && !signedIn)) continue
+        if (!e.shown || (e.item == TopBarMenuItem.PROFILE && !signedIn) || (e.item == TopBarMenuItem.BROWSE_MEDIA && onBrowseMedia == null)) continue
         val last = rows.lastOrNull()
         if (e.item.half && last != null && last.size == 1 && last[0].half) last += e.item else rows += mutableListOf(e.item)
     }
@@ -385,7 +417,7 @@ private fun ToolbarPanel(
                     }
                     // The feed's images and videos, full screen, one after another (#103).
                     TopBarMenuItem.BROWSE_MEDIA ->
-                        PanelButton(Icons.Outlined.VideoLibrary, "Browse media", Modifier.fillMaxWidth(), onBrowseMedia, shape(0))
+                        PanelButton(Icons.Outlined.VideoLibrary, "Browse media", Modifier.fillMaxWidth(), onBrowseMedia ?: {}, shape(0))
                     TopBarMenuItem.LAYOUT -> Column(
                         Modifier
                             .fillMaxWidth()

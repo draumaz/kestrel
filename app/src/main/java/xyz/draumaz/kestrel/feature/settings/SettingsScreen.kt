@@ -1,5 +1,8 @@
 package xyz.draumaz.kestrel.feature.settings
 
+import androidx.compose.material.icons.automirrored.rounded.Notes
+import xyz.draumaz.kestrel.feature.inbox.InboxNotifications
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.outlined.Folder
@@ -66,6 +69,7 @@ import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.DoNotDisturbOn
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.FilterAlt
@@ -318,11 +322,13 @@ fun SettingsList(
     var aiKeySet by remember { mutableStateOf(false) }
     var giphyKeySet by remember { mutableStateOf(false) }
     var azureKeySet by remember { mutableStateOf(false) }
+    var deeplKeySet by remember { mutableStateOf(false) }
     var authMode by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(secureVersion, session) {
         aiKeySet = !app.secureStore.openaiKey().isNullOrEmpty()
         giphyKeySet = !app.secureStore.giphyKey().isNullOrEmpty()
         azureKeySet = !app.secureStore.azureTranslatorKey().isNullOrEmpty()
+        deeplKeySet = !app.secureStore.deeplKey().isNullOrEmpty()
         authMode = runCatching { app.secureStore.authMode() }.getOrNull()
     }
     val web = authMode == "web"
@@ -374,6 +380,11 @@ fun SettingsList(
             pickOption(PostDisplay.entries.map { PickOption(it, it.label, icon = it.icon) }, s.postDisplay)
                 ?.let(ctrl::setPostDisplay)
         })
+        // How much of a post's text feeds show (#186).
+        val textLines = listOf(PickOption(0, "Layout's default", "2 or 3 lines"), PickOption(5, "5 lines"), PickOption(10, "10 lines"))
+        tile("Post text in feeds", textLines.first { it.value == s.postTextLines }.label, Icons.AutoMirrored.Rounded.Notes, onClick = launch {
+            pickOption(textLines, s.postTextLines)?.let(ctrl::setPostTextLines)
+        })
         switch(
             "Subreddit icons", "Show each community's icon on posts instead of its first letter",
             Icons.Rounded.Image, s.subredditIcons, ctrl::setSubredditIcons,
@@ -385,9 +396,10 @@ fun SettingsList(
             "Posts tab shows r/all", "Instead of your frontpage, which Explore's All button opens then. For You, Blend and Reddit Home don't apply.",
             Icons.Rounded.Public, s.postsTabAll, ctrl::setPostsTabAll,
         )
+        // What Home shows, as the chips at its top (#199): picking Best there turns it off.
         switch(
-            "\"For You\" feed",
-            "A personalized frontpage, built on your phone from what you read and like",
+            "Home shows For You",
+            "Your personalized frontpage, built on your phone. Same as picking For You at the top of Home",
             Icons.Rounded.AutoAwesome, s.forYouFeed, ctrl::setForYouFeed,
         )
         switch(
@@ -414,8 +426,8 @@ fun SettingsList(
         })
         if (s.redditHomeAllowed) {
             switch(
-                "Blend (Beta)",
-                "For You also ranks your Reddit Home: Reddit's recommendations, under your For You choices",
+                "Home shows Blend (Beta)",
+                "For You also ranks your Reddit Home: Reddit's recommendations, under your For You choices. Same as picking Blend on Home",
                 Icons.Rounded.Merge, s.forYouFeed && s.blendHome,
             ) { v ->
                 ctrl.setBlendHome(v)
@@ -582,6 +594,11 @@ fun SettingsList(
             Icons.Rounded.KeyboardArrowDown, s.threadJumpNext, ctrl::setThreadJumpNext,
         )
         switch(
+            "Hide thread buttons while scrolling",
+            "They step aside while your finger scrolls a thread and come back when it stops",
+            Icons.Rounded.UnfoldLess, s.threadButtonsHideOnScroll, ctrl::setThreadButtonsHideOnScroll,
+        )
+        switch(
             "Jump to OP's comments button",
             "Show a button in threads to jump between comments by the original poster",
             Icons.Rounded.RecordVoiceOver, s.threadJumpOp, ctrl::setThreadJumpOp,
@@ -619,12 +636,16 @@ fun SettingsList(
             )
         }
         switch(
-            "Back scrolls Posts to top", "On the Posts tab, back scrolls the feed to the top. Back never leaves the app",
+            "Back scrolls Posts to top", "On the Posts tab, back scrolls the feed to the top",
             Icons.Rounded.VerticalAlignTop, s.backScrollsToTop, ctrl::setBackScrollsToTop,
         )
         switch(
             "Button haptics", "A light tap you can feel on buttons, switches and the bottom bar",
             Icons.Rounded.Vibration, s.buttonHaptics, ctrl::setButtonHaptics,
+        )
+        switch(
+            "Back leaves the app", "On the Posts tab, once there's nothing else for back to do. Off: back never leaves the app",
+            Icons.AutoMirrored.Rounded.ExitToApp, s.backLeavesApp, ctrl::setBackLeavesApp,
         )
         divider("appearance")
 
@@ -639,7 +660,7 @@ fun SettingsList(
             COMMENT_SORTS.firstOrNull { it.first == s.defaultCommentSort }?.second ?: s.defaultCommentSort,
             Icons.Outlined.Forum,
             onClick = launch {
-                pickOption(COMMENT_SORTS.map { PickOption(it.first, it.second) }, s.defaultCommentSort, radio = false)
+                pickOption(COMMENT_SORTS.map { PickOption(it.first, it.second) }, s.defaultCommentSort)
                     ?.let(ctrl::setDefaultCommentSort)
             },
         )
@@ -682,6 +703,12 @@ fun SettingsList(
                     s.collapseBelowScore ?: Int.MIN_VALUE,
                 )?.let { ctrl.setCollapseBelowScore(it.takeIf { v -> v != Int.MIN_VALUE }) }
             },
+        )
+        // Collapsing AutoModerator and pinned bots (#202): here only, with the other collapse
+        // options (it was also in Content filters, which read as a second, different switch).
+        switch(
+            "Collapse AutoModerator and bots", "Start AutoModerator's comments, and pinned comments by bots, collapsed",
+            Icons.Outlined.SmartToy, filters.collapseAutoMod, app.contentFilters::setCollapseAutoMod,
         )
         switch(
             "Open threads collapsed",
@@ -750,9 +777,19 @@ fun SettingsList(
         section("Notifications")
         switch(
             "Inbox notifications",
-            "Check for replies & messages in the background (~every 15 min) and notify you. No Firebase — polling only.",
+            "Check for replies & messages in the background and notify you. No Firebase — polling only.",
             Icons.Outlined.NotificationsActive, s.notifyInbox,
         ) { v -> scope.launch { toggleInboxNotifications(v) } }
+        // How often (#188): less often saves battery and Reddit requests.
+        if (s.notifyInbox) {
+            val every = listOf(15, 30, 60, 180, 360).map { PickOption(it, InboxNotifications.intervalLabel(it)) }
+            tile("Check every", InboxNotifications.intervalLabel(s.inboxCheckMinutes), Icons.Outlined.Schedule, onClick = launch {
+                pickOption(every, s.inboxCheckMinutes)?.let {
+                    ctrl.setInboxCheckMinutes(it)
+                    app.inbox.registerPolling()
+                }
+            })
+        }
         switch(
             "Open Reddit app notifications in Kestrel",
             when {
@@ -778,7 +815,7 @@ fun SettingsList(
                 val options = listOf(PickOption("", "Off")) +
                     TRANSLATE_LANGUAGES.filter { it != Translate.primary }
                         .map { PickOption(it, Translate.languageName(it)) }.sortedBy { it.label }
-                pickOption(options, s.translateSecondLanguage, radio = false)?.let(ctrl::setTranslateSecondLanguage)
+                pickOption(options, s.translateSecondLanguage)?.let(ctrl::setTranslateSecondLanguage)
             },
         )
         switch(
@@ -788,7 +825,7 @@ fun SettingsList(
         )
         tile(
             "Translation service",
-            (if (s.translateService == "azure") "Azure Translator" else "OpenAI (your AI key)") +
+            (when (s.translateService) { "azure" -> "Azure Translator"; "deepl" -> "DeepL"; else -> "OpenAI (your AI key)" }) +
                 " · for languages your phone can't translate",
             Icons.Outlined.Dns,
             onClick = launch {
@@ -796,6 +833,7 @@ fun SettingsList(
                     listOf(
                         PickOption("openai", "OpenAI", "Your AI summaries key; each translation costs a little"),
                         PickOption("azure", "Azure Translator", "Your Azure key; 2 million characters a month free"),
+                        PickOption("deepl", "DeepL", "Your DeepL API key"),
                     ),
                     s.translateService,
                 )?.let(ctrl::setTranslateService)
@@ -826,6 +864,24 @@ fun SettingsList(
                 ctrl.setAzureRegion(r.text.trim())
             })
         }
+        if (s.translateService == "deepl") {
+            tile(
+                "DeepL key",
+                if (deeplKeySet) "Key set — tap to change or remove" else "Add your DeepL API key (deepl.com › API)",
+                Icons.Outlined.Key,
+                onClick = launch {
+                    val r = textDialog(
+                        "DeepL key", secret = true, removable = deeplKeySet,
+                        note = "Stored securely on this device (never in backups). Translations send the text to DeepL.",
+                    ) ?: return@launch
+                    when (r) {
+                        TextResult.Remove -> app.secureStore.saveDeeplKey(null)
+                        is TextResult.Save -> if (r.text.isNotBlank()) app.secureStore.saveDeeplKey(r.text.trim())
+                    }
+                    secureVersion++
+                },
+            )
+        }
         divider("translation")
 
         // ---------------------------------------------------------------- AI
@@ -851,7 +907,7 @@ fun SettingsList(
         tile("Model", s.aiModel, Icons.Outlined.SmartToy, enabled = aiKeySet, onClick = launch {
             // The presets are OpenAI's; any other provider's model is typed in.
             val presets = (AI_MODELS + listOfNotNull(s.aiModel.takeIf { it !in AI_MODELS })).map { PickOption(it, it) }
-            val picked = pickOption(presets + PickOption(CUSTOM_MODEL, "Custom model…", "Type your provider's model ID"), s.aiModel, radio = false)
+            val picked = pickOption(presets + PickOption(CUSTOM_MODEL, "Custom model…", "Type your provider's model ID"), s.aiModel)
                 ?: return@launch
             if (picked != CUSTOM_MODEL) return@launch ctrl.setAiModel(picked)
             val r = textDialog(
@@ -865,7 +921,7 @@ fun SettingsList(
             SUMMARY_STYLE_LABELS[s.aiSummaryStyle.coerceIn(0, SUMMARY_STYLE_LABELS.size - 1)],
             Icons.Rounded.AutoAwesome, enabled = aiKeySet,
             onClick = launch {
-                pickOption(SUMMARY_STYLE_LABELS.mapIndexed { i, l -> PickOption(i, l) }, s.aiSummaryStyle, radio = false)
+                pickOption(SUMMARY_STYLE_LABELS.mapIndexed { i, l -> PickOption(i, l) }, s.aiSummaryStyle)
                     ?.let(ctrl::setAiSummaryStyle)
             },
         )
@@ -874,7 +930,7 @@ fun SettingsList(
             SUMMARY_LANGUAGES.firstOrNull { it.first == s.aiSummaryLanguage }?.second ?: s.aiSummaryLanguage,
             Icons.Rounded.Translate, enabled = aiKeySet,
             onClick = launch {
-                pickOption(SUMMARY_LANGUAGES.map { PickOption(it.first, it.second) }, s.aiSummaryLanguage, radio = false)
+                pickOption(SUMMARY_LANGUAGES.map { PickOption(it.first, it.second) }, s.aiSummaryLanguage)
                     ?.let(ctrl::setAiSummaryLanguage)
             },
         )
@@ -887,7 +943,7 @@ fun SettingsList(
                     listOf(50_000, 100_000, 200_000, 400_000).map {
                         PickOption(it, "${it / 1000}k characters", "~${(it / 4000.0).roundToInt()}k tokens")
                     },
-                    s.aiMaxChars, radio = false,
+                    s.aiMaxChars,
                 )?.let(ctrl::setAiMaxChars)
             },
         )
@@ -1391,7 +1447,7 @@ private suspend fun toggleInboxNotifications(enable: Boolean) {
     // notification for every pre-existing item, then start the periodic poll.
     runCatching { app.inbox.pollInbox(notify = false) }
     app.inbox.registerPolling()
-    nav?.showSnackbar("Inbox notifications on. Reddit is checked about every 15 minutes.")
+    nav?.showSnackbar("Inbox notifications on. Reddit is checked about every ${InboxNotifications.intervalLabel(app.settings.value.inboxCheckMinutes)}.")
 }
 
 private suspend fun checkUpdatesNow() {

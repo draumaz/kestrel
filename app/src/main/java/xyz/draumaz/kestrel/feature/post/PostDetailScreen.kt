@@ -1,5 +1,9 @@
 package xyz.draumaz.kestrel.feature.post
 
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.Immutable
 import xyz.draumaz.kestrel.ui.pageFill
 import androidx.compose.ui.graphics.StrokeCap
@@ -16,6 +20,7 @@ import xyz.draumaz.kestrel.feature.feed.FabScroll
 import xyz.draumaz.kestrel.feature.feed.CollapsingFab
 import xyz.draumaz.kestrel.settings.ThreadFab
 import xyz.draumaz.kestrel.settings.ThreadFabPosition
+import xyz.draumaz.kestrel.feature.feed.rememberFabScroll
 import androidx.compose.material3.FabPosition
 import androidx.compose.material.icons.rounded.VerticalAlignTop
 import xyz.draumaz.kestrel.settings.calmComments
@@ -58,6 +63,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -125,6 +131,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableIntStateOf
@@ -265,6 +275,8 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
     @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(cacheWindow = LazyLayoutCacheWindow(ahead = 900.dp, behind = 300.dp))
     val scope = rememberCoroutineScope()
+    // Reopens where you left off (#179); a link to one comment opens on that comment instead.
+    if (focusCommentId == null) ThreadPosition(postId, listState, flat)
     val haptic = LocalHapticFeedback.current
 
     // In-post comment search. Matches by fullname, not list position:
@@ -367,7 +379,14 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
         revealId = null
     }
 
-    val fab = remember { FabScroll() }
+    val fab = rememberFabScroll()
+    // Settings › Hide thread buttons while scrolling (#210): from a finger's drag until
+    // the scroll (and its fling) stops; a jump button's own scroll doesn't count.
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    var fingerScroll by remember { mutableStateOf(false) }
+    LaunchedEffect(dragged) { if (dragged) fingerScroll = true }
+    LaunchedEffect(listState.isScrollInProgress) { if (!listState.isScrollInProgress) fingerScroll = false }
+    val hideButtons = settings.threadButtonsHideOnScroll && fingerScroll
     Scaffold(
         topBar = {
             TopAppBar(
@@ -410,7 +429,7 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
                 val hasMine = remember(flat, username, settings.threadJumpMine) {
                     settings.threadJumpMine && username.isNotEmpty() && flat.any { !it.isMore && it.author == username }
                 }
-                ThreadToolbar(
+                AnimatedVisibility(!hideButtons, enter = fadeIn(), exit = fadeOut()) { ThreadToolbar(
                     newCount = newCount,
                     hasOp = hasOp,
                     hasMine = hasMine,
@@ -439,7 +458,7 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
                         jumpNext(backwards = true) { it.depth == 0 }
                     },
                     expanded = fab.expanded,
-                )
+                ) }
             }
         },
         containerColor = pageFill(),
@@ -491,6 +510,40 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
             }
         }
     }
+}
+
+/**
+ * Where you were in a thread (#179): reopening it scrolls back to the comment that was at
+ * the top of the screen, once the comments are in, with "Top" to go back up. Saved as you
+ * leave, or when Android stops the app; at the top, it's forgotten.
+ */
+@Composable
+private fun ThreadPosition(postId: String, listState: LazyListState, flat: List<Comment>) {
+    val nav = LocalNavigator.current
+    val scope = rememberCoroutineScope()
+    val resumeAt = remember(postId) { app.threadVisits.lastPosition(postId) }
+    // Once a visit: not again on coming back from a profile or a link opened from here.
+    var resumed by rememberSaveable(postId) { mutableStateOf(resumeAt == null) }
+    LaunchedEffect(flat.isNotEmpty()) {
+        if (resumed || flat.isEmpty() || resumeAt == null) return@LaunchedEffect
+        resumed = true
+        val i = flat.indexOfFirst { it.fullname == resumeAt.first }
+        if (i < 0) return@LaunchedEffect // gone, or folded away: the top, as before
+        listState.scrollToItem(i + 1, resumeAt.second) // the post's header is item 0
+        nav.showSnackbar("Back where you left off", actionLabel = "Top") { scope.launch { listState.animateScrollToItem(0) } }
+    }
+    fun save() {
+        // Still loading: nothing new to save, and the last position stays.
+        if (!resumed) return
+        val key = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
+        if (listState.firstVisibleItemIndex == 0 || key == null || !key.startsWith("t1_")) {
+            app.threadVisits.recordPosition(postId, null, 0)
+        } else {
+            app.threadVisits.recordPosition(postId, key, listState.firstVisibleItemScrollOffset)
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { save() }
+    DisposableEffect(postId) { onDispose { save() } }
 }
 
 /** Pause/resume reading time with the screen; learn when another screen covers it. */
@@ -672,7 +725,7 @@ private class ThreadActions(val vm: CommentsViewModel, val nav: AppNavigator, va
 
     /** ⋯ → Translate / Show original on one comment. */
     fun translate(c: Comment) = vm.translateComment(c.fullname) { targets ->
-        pickOption(targets.map { PickOption(it, "Translate to ${Translate.languageName(it)}") }, null, radio = false)
+        pickOption(targets.map { PickOption(it, "Translate to ${Translate.languageName(it)}") }, null)
     }
 
     fun block(c: Comment) {
@@ -710,8 +763,13 @@ private fun CommentList(
             contentPadding = PaddingValues(top = 6.dp, bottom = 160.dp),
         ) {
             item(key = "header", contentType = "header") {
-                // Translate sits on the post, with its share / save.
-                PostHeader(thread.post, fresh = true, translate = actions.translateButton)
+                Column {
+                    // Translate sits on the post, with its share / save.
+                    PostHeader(thread.post, fresh = true, translate = actions.translateButton)
+                    // Contest mode (#204): why the order looks random and the scores are missing.
+                    // In the header's item, so the comments stay where scrolling expects them.
+                    if (thread.post.contestMode) ContestNotice()
+                }
             }
             if (flat.isEmpty()) {
                 item(key = "empty", contentType = "empty") {
@@ -725,13 +783,18 @@ private fun CommentList(
                     val first = i == 0 || c.depth == 0
                     val last = i == flat.lastIndex || flat[i + 1].depth == 0
                     val rails = CalmRails(c.depth, prev = if (i == 0) 0 else flat[i - 1].depth, next = if (i == flat.lastIndex) 0 else flat[i + 1].depth)
-                    CalmThreadRow(first, last, highlighted = currentMatchId == c.fullname, rails) {
+                    CalmThreadRow(first, last, highlighted = currentMatchId == c.fullname) {
                         if (c.isMore) {
-                            MoreRow(c, loading = c.fullname in thread.loadingMore, onClick = { actions.loadMore(c) }, start = calmIndent(c.depth) - 6.dp)
+                            Box(Modifier.fillMaxWidth().calmRails(rails)) {
+                                MoreRow(c, loading = c.fullname in thread.loadingMore, onClick = { actions.loadMore(c) }, start = calmIndent(c.depth) - 6.dp)
+                            }
                         } else {
+                            val folded = CommentTree.folded(c.id) in thread.collapsed && c.id !in thread.collapsed
                             Column {
                                 CalmCommentRow(
                                     comment = c,
+                                    // Folded replies under it carry the lines on.
+                                    rails = if (folded) CalmRails(rails.depth, rails.prev, next = rails.depth) else rails,
                                     isNew = isNew(c),
                                     isOwn = username.isNotEmpty() && c.author == username,
                                     opAuthor = thread.post.author,
@@ -739,7 +802,9 @@ private fun CommentList(
                                     settings = settings,
                                     actions = actions,
                                 )
-                                if (CommentTree.folded(c.id) in thread.collapsed && c.id !in thread.collapsed) FoldedReplies(c, actions)
+                                if (folded) {
+                                    Box(Modifier.fillMaxWidth().calmRails(CalmRails(rails.depth, prev = rails.depth, rails.next))) { FoldedReplies(c, actions) }
+                                }
                             }
                         }
                     }
@@ -1482,7 +1547,8 @@ private fun CommentTile(
     val nameColor = when {
         isMod -> Color(0xFF4CAF50)
         isOwn -> cs.primary
-        else -> cs.onSurface
+        // The theme's softer tone, so a name stands apart from the text under it (#185).
+        else -> cs.secondary
     }
     val edge = railColors[(depth - 1).coerceIn(0, railColors.size - 1)].copy(alpha = 0.9f)
     // Settings → Mark what you voted on: a glow, or an edge on the other side.
@@ -1628,11 +1694,12 @@ private fun Badge(text: String, bg: Color, fg: Color, size: androidx.compose.ui.
 
 /**
  * Settings → Mark comments you voted on (#122): the vote's colour glows softly from
- * the comment's top corner (the end side), fading in and out with the vote. A still
- * gradient, drawn: nothing to lay out or animate while scrolling.
+ * the comment's top corner (the end side), fading in and out with the vote; post
+ * cards too (#173). A still gradient, drawn: nothing to lay out or animate while
+ * scrolling.
  */
 @Composable
-private fun Modifier.voteGlow(color: Color?, rtl: Boolean, fadeTop: Boolean = false): Modifier {
+internal fun Modifier.voteGlow(color: Color?, rtl: Boolean, fadeTop: Boolean = false): Modifier {
     var last by remember { mutableStateOf(color ?: Color.Transparent) }
     if (color != null) last = color
     val shown by animateFloatAsState(if (color != null) 1f else 0f, tween(350), label = "voteGlow")
@@ -1664,16 +1731,37 @@ private fun Modifier.voteGlow(color: Color?, rtl: Boolean, fadeTop: Boolean = fa
 private fun FlairChip(flair: UserFlair, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val (text, emoji) = xyz.draumaz.kestrel.feature.feed.rememberFlairText(flair)
-    Text(
-        text,
-        // Lightly tinted, as post flairs are (#131).
-        modifier.widthIn(max = 160.dp).clip(RoundedCornerShape(6.dp)).background(cs.secondaryContainer).padding(horizontal = 6.dp, vertical = 1.dp),
-        fontSize = 11.sp,
-        color = cs.onSecondaryContainer,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        inlineContent = emoji,
-    )
+    // Beside a long name there may be next to no room left: then no chip, rather than an
+    // empty one or a lone "…" (#193). An image-only flair needs less than one with words.
+    if (flair.parts.none { !it.text.isNullOrBlank() || it.emojiUrl != null }) return // blank: nothing to show
+    val wordless = flair.parts.all { it.text.isNullOrBlank() }
+    // Cut short, a tap shows it whole (#209).
+    var cut by remember { mutableStateOf(false) }
+    var full by remember { mutableStateOf(false) }
+    BoxWithConstraints(modifier) {
+        if (maxWidth < if (wordless) 30.dp else 52.dp) return@BoxWithConstraints
+        Text(
+            text,
+            // Lightly tinted, as post flairs are (#131).
+            Modifier.widthIn(max = 200.dp).clip(RoundedCornerShape(6.dp))
+                .then(if (cut) Modifier.clickable { full = true } else Modifier)
+                .background(cs.secondaryContainer).padding(horizontal = 6.dp, vertical = 1.dp),
+            fontSize = 11.sp,
+            color = cs.onSecondaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            inlineContent = emoji,
+            onTextLayout = { cut = it.hasVisualOverflow },
+        )
+        DropdownMenu(expanded = full, onDismissRequest = { full = false }) {
+            Text(
+                text,
+                Modifier.widthIn(max = 280.dp).padding(horizontal = 14.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.bodyMedium,
+                inlineContent = emoji,
+            )
+        }
+    }
 }
 
 @Composable
@@ -1728,6 +1816,25 @@ private fun CommentActionsRow(c: Comment, isOwn: Boolean, actions: ThreadActions
     }
 }
 
+/** A comment's text in a sheet, to select any part of it and copy that (#198). */
+@OptIn(ExperimentalMaterial3Api::class)
+private fun showSelectText(body: String) {
+    Overlays.launch { done ->
+        ModalBottomSheet(onDismissRequest = done) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            ) {
+                Text("Select text", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Text("Long press a word, then drag to choose", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                RedditMarkdown(body, selectable = true)
+            }
+        }
+    }
+}
+
 /** The comment ⋯ menu's entries; [pick] closes the menu then runs the action. */
 @Composable
 private fun ColumnScope.CommentMenuItems(
@@ -1737,9 +1844,15 @@ private fun ColumnScope.CommentMenuItems(
     withSave: Boolean = false,
     pick: (() -> Unit) -> Unit,
 ) {
-    // Material 3 Expressive menu groups: share-ish actions, then yours (or
-    // block), then moderator actions.
+    // Material 3 Expressive menu groups: share-ish actions, then block,
+    // then moderator actions. Your own comment's Edit / Delete come first (#203).
     val groups = buildList<@Composable ColumnScope.() -> Unit> {
+        if (isOwn) {
+            add {
+                DropdownMenuItem(text = { Text("Edit") }, onClick = { pick { actions.edit(c) } })
+                DropdownMenuItem(text = { Text("Delete") }, onClick = { pick { actions.delete(c) } })
+            }
+        }
         add {
             if (withSave) DropdownMenuItem(text = { Text(if (c.saved) "Unsave" else "Save") }, onClick = { pick { actions.toggleSave(c) } })
             DropdownMenuItem(
@@ -1747,15 +1860,12 @@ private fun ColumnScope.CommentMenuItems(
                 onClick = { pick { actions.translate(c) } },
             )
             DropdownMenuItem(text = { Text("Copy text") }, onClick = { pick { copyToClipboard(c.body) } })
+            // Part of it (#198), as iOS's: long press stays collapse.
+            DropdownMenuItem(text = { Text("Select text") }, onClick = { pick { showSelectText(c.body) } })
             if (c.permalink.isNotEmpty()) DropdownMenuItem(text = { Text("Share") }, onClick = { pick { actions.share(c) } })
             DropdownMenuItem(text = { Text("Share as image") }, onClick = { pick { actions.shareImage(c) } })
         }
-        if (isOwn) {
-            add {
-                DropdownMenuItem(text = { Text("Edit") }, onClick = { pick { actions.edit(c) } })
-                DropdownMenuItem(text = { Text("Delete") }, onClick = { pick { actions.delete(c) } })
-            }
-        } else if (c.author != "[deleted]") {
+        if (!isOwn && c.author != "[deleted]") {
             add { DropdownMenuItem(text = { Text("Block u/${c.author}") }, onClick = { pick { actions.block(c) } }) }
         }
         // Moderators of this community (the post says so) can act on comments too.
@@ -1806,15 +1916,34 @@ private fun calmIndent(depth: Int) = 16.dp + CalmRailStep * depth.coerceIn(0, 8)
 private class CalmRails(val depth: Int, val prev: Int, val next: Int)
 
 /**
+ * Draws a row's [rails]: one line per ancestor, joined row to row (#166). On what the
+ * row's content draws, not the row: a swipe slides the comment over a background that
+ * would hide them, and the lines go with it (#175). Drawn, not laid out (no extra
+ * layout pass per depth).
+ */
+private fun Modifier.calmRails(rails: CalmRails) = drawBehind {
+    val w = 2.5.dp.toPx()
+    val inset = 6.dp.toPx() // where a line starts or stops, so its round end shows
+    for (l in 0 until rails.depth.coerceAtMost(8)) {
+        val x = (CalmRailStep * (l + 1)).toPx()
+        val cx = if (layoutDirection == LayoutDirection.Rtl) size.width - x else x
+        // A line starts on its first reply and stops on the last one under it.
+        val top = if (rails.prev <= l) inset else -w
+        val bottom = if (rails.next <= l) size.height - inset else size.height + w
+        // A soft colour per depth, as the cards style's edges (#166).
+        drawLine(railColors[l % railColors.size], Offset(cx, top), Offset(cx, bottom), w, StrokeCap.Round)
+    }
+}
+
+/**
  * One row of a Calm thread container (surfaceContainerLow, radius 24, 12dp
  * side margin): [first] rounds the top and adds the container's top inset,
- * [last] rounds the bottom and leaves the 10dp gap to the next thread. It
- * draws the row's [rails]: one line per ancestor, joined row to row (#166).
+ * [last] rounds the bottom and leaves the 10dp gap to the next thread. Its
+ * content draws the rails ([calmRails]).
  */
 @Composable
-private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, rails: CalmRails, content: @Composable () -> Unit) {
+private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val shape = RoundedCornerShape(
         topStart = if (first) CalmRadius else 0.dp,
         topEnd = if (first) CalmRadius else 0.dp,
@@ -1828,21 +1957,7 @@ private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, r
             .clip(shape)
             .background(xyz.draumaz.kestrel.feature.feed.calmCardColor())
             .padding(top = if (first) 6.dp else 0.dp, bottom = if (last) 6.dp else 0.dp)
-            .then(if (highlighted) Modifier.background(cs.primaryContainer) else Modifier)
-            // Drawn, not laid out (no extra layout pass per depth).
-            .drawBehind {
-                val w = 2.5.dp.toPx()
-                val inset = 6.dp.toPx() // where a line starts or stops, so its round end shows
-                for (l in 0 until rails.depth.coerceAtMost(8)) {
-                    val x = (CalmRailStep * (l + 1)).toPx()
-                    val cx = if (rtl) size.width - x else x
-                    // A line starts on its first reply and stops on the last one under it.
-                    val top = if (rails.prev <= l) inset else -w
-                    val bottom = if (rails.next <= l) size.height - inset else size.height + w
-                    // A soft colour per depth, as the cards style's edges (#166).
-                    drawLine(railColors[l % railColors.size], Offset(cx, top), Offset(cx, bottom), w, StrokeCap.Round)
-                }
-            },
+            .then(if (highlighted) Modifier.background(cs.primaryContainer) else Modifier),
     ) { content() }
 }
 
@@ -1855,6 +1970,7 @@ private fun CalmThreadRow(first: Boolean, last: Boolean, highlighted: Boolean, r
 @Composable
 private fun CalmCommentRow(
     comment: Comment,
+    rails: CalmRails,
     isNew: Boolean,
     isOwn: Boolean,
     opAuthor: String,
@@ -1872,7 +1988,8 @@ private fun CalmCommentRow(
     val nameColor = when {
         comment.distinguished == "moderator" -> Color(0xFF4CAF50)
         isOwn -> cs.primary
-        else -> cs.onSurface
+        // The theme's softer tone, so a name stands apart from the text under it (#185).
+        else -> cs.secondary
     }
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val toggle = { actions.toggle(comment) }
@@ -1899,7 +2016,8 @@ private fun CalmCommentRow(
         Column(
             Modifier
                 .fillMaxWidth()
-                // The rails are the thread row's (CalmThreadRow); this marks your vote.
+                .calmRails(rails)
+                // This marks your vote.
                 .drawBehind {
                     val w = 2.dp.toPx()
                     val top = 10.dp.toPx()
@@ -2052,6 +2170,28 @@ private fun CollapsePill(icon: ImageVector, label: String, onClick: () -> Unit) 
     }
 }
 
+/** Reddit's contest mode note (#204), as reddit.com shows it above the comments. */
+@Composable
+private fun ContestNotice() {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(cs.surfaceContainerHigh)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.EmojiEvents, null, tint = cs.primary)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text("Contest mode is on", style = MaterialTheme.typography.titleSmall)
+            Text("Comments are in random order, and their scores are hidden from everyone but the moderators", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
 /**
  * A post's text with the images / GIFs / videos in it shown inline (uploaded
  * ones via `media_metadata`, and linked i.redd.it / preview.redd.it /
@@ -2060,6 +2200,9 @@ private fun CollapsePill(icon: ImageVector, label: String, onClick: () -> Unit) 
 @Composable
 private fun PostBody(p: Post) {
     if (p.selftext.isEmpty()) return
+    // A spoiler's text stays covered until tapped (#204), as on reddit.com.
+    var shown by rememberSaveable(p.id) { mutableStateOf(!p.spoiler) }
+    if (!shown) return xyz.draumaz.kestrel.feature.feed.SpoilerTextCover { shown = true }
     BodyWithMedia(p.selftext, p.bodyMedia, LocalNavigator.current, maxMedia = 10, selectable = true)
 }
 

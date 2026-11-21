@@ -222,6 +222,7 @@ data class Settings(
     val subredditSorts: Map<String, SubredditSort> = emptyMap(), // by lowercase name; overrides defaultSort there
     val defaultCommentSort: String = "confidence", // reddit comment sort id
     val postDisplay: PostDisplay = PostDisplay.CALM,
+    val postTextLines: Int = 0, // a post's text in feeds, in lines (#186); 0: the layout's own (2–3)
     val commentStyle: CommentStyle = CommentStyle.SAME,
     val swipeActions: Boolean = true,
     val floatingChips: Boolean = true, // feeds: filter chips float under the top bar past the list's own
@@ -257,6 +258,7 @@ data class Settings(
     val feedGalleryCarousel: Boolean = true, // galleries in feeds as the M3 carousel (else one image at a time)
     val showApiUsage: Boolean = false, // show API usage instead of search on Posts screen
     val notifyInbox: Boolean = false, // background-poll the inbox + local notifications
+    val inboxCheckMinutes: Int = 15, // how often (#188): 15 is Android's shortest
     val redditAppNotifications: Boolean = false, // take over the Reddit app's notifications (needs notification access)
     val homeFab: HomeFab = HomeFab.NEW_POST, // floating button on Home and in subreddits (#90)
     val threadFab: ThreadFab = ThreadFab.NEW_COMMENT, // floating button in a thread (#90)
@@ -264,6 +266,7 @@ data class Settings(
     val threadJumpOp: Boolean = true, // show OP comments jump button in thread toolbar
     val threadJumpMine: Boolean = true, // show your comments jump button in thread toolbar
     val threadJumpNext: Boolean = true, // the thread toolbar's next top-level comment button (#121)
+    val threadButtonsHideOnScroll: Boolean = false, // the thread's buttons step aside while you scroll (#210)
     val topBarMode: TopBarMode = TopBarMode.EXPANDABLE, // Posts-screen action layout
     // The top bar menu panel's buttons and order, per mode (#108).
     val topBarMenuExpandable: List<TopBarMenuEntry> = TopBarMenuItem.parse(null, TopBarMode.EXPANDABLE),
@@ -275,6 +278,7 @@ data class Settings(
     val navOutline: Boolean = true, // thin outline around the floating bottom bar (#29)
     val buttonHaptics: Boolean = false, // a key-tap buzz on buttons, chips, switches and the nav pill (ButtonHaptics)
     val backScrollsToTop: Boolean = true, // back on the Posts tab scrolls the feed to top
+    val backLeavesApp: Boolean = false, // back on Posts, with nothing left to do, leaves the app (#206)
     val aiModel: String = "gpt-5.4-mini", // OpenAI(-compatible) model id for summaries
     val aiSummaryStyle: Int = 1, // index into SummaryStyle (Key points)
     val aiSummaryLanguage: String = "", // English name of the language summaries are written in; "" = the thread's own

@@ -4,6 +4,7 @@ import xyz.draumaz.kestrel.feature.home.LocalEdgeDrag
 import xyz.draumaz.kestrel.feature.home.SideBarEdge
 import xyz.draumaz.kestrel.feature.feed.FabScroll
 import xyz.draumaz.kestrel.feature.feed.CollapsingFab
+import xyz.draumaz.kestrel.feature.feed.rememberFabScroll
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import xyz.draumaz.kestrel.ui.ConnectedChoice
 import xyz.draumaz.kestrel.ui.RefreshBox
@@ -105,6 +106,7 @@ import xyz.draumaz.kestrel.nav.LocalNavigator
 import xyz.draumaz.kestrel.nav.NavCache
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.ui.friendlyError
+import xyz.draumaz.kestrel.feature.post.confirmDelete
 import kotlinx.coroutines.launch
 
 /** The Inbox tab. [reselect] bumps when the tab is re-tapped (scroll to top). */
@@ -159,7 +161,7 @@ fun InboxScreen(reselect: Int, selected: Boolean = true) {
         if (reselect != initialReselect) lists[pager.currentPage].animateScrollToItem(0)
     }
 
-    val fab = remember { FabScroll() }
+    val fab = rememberFabScroll()
     val openSideBar = LocalSideBar.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     Scaffold(
@@ -406,7 +408,12 @@ private fun SwipeableInboxCard(item: InboxItem, onOpen: () -> Unit) {
         }
     }
     val end = remember(item.fullname, item.isMessage, cs.error) {
-        if (item.isMessage) SwipeSpec(Icons.Outlined.DeleteOutline, cs.error) { app.inbox.deleteMessage(item.fullname) } else null
+        // Deleting can't be undone, so the swipe asks first.
+        if (item.isMessage) {
+            SwipeSpec(Icons.Outlined.DeleteOutline, cs.error) {
+                app.scope.launch { if (confirmDelete("message")) app.inbox.deleteMessage(item.fullname) }
+            }
+        } else null
     }
     SwipeActions(start = start, end = end) { InboxCard(item, onOpen) }
 }

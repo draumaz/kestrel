@@ -2,6 +2,7 @@ package xyz.draumaz.kestrel.feature.feed
 
 import xyz.draumaz.kestrel.ui.SearchIcon
 import xyz.draumaz.kestrel.ui.paneSize
+import xyz.draumaz.kestrel.feature.post.voteGlow
 import androidx.compose.material3.IconButtonDefaults
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -90,9 +91,12 @@ fun BloomCard(
     onLongClick: (() -> Unit)? = null,
     shape: RoundedCornerShape = BloomCardShape,
     color: Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    // Your vote's glow from the top end corner (#173), as on comments.
+    glow: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    var m = modifier.clip(shape).background(color)
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    var m = modifier.clip(shape).background(color).voteGlow(glow, rtl)
     if (onClick != null || onLongClick != null) {
         m = m.combinedClickable(onClick = { onClick?.invoke() }, onLongClick = onLongClick)
     }
@@ -276,6 +280,8 @@ fun BloomTopBar(
     actions: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {},
     titleContent: (@Composable () -> Unit)? = null,
     showBack: Boolean = true,
+    // In place of ☰ / ←, e.g. a selection's × (#180): it lines up where they sit.
+    navigation: (@Composable () -> Unit)? = null,
 ) {
     val nav = LocalNavigator.current
     TopAppBar(
@@ -291,7 +297,8 @@ fun BloomTopBar(
         },
         navigationIcon = {
             // A page the side bar opened (#111): ☰ instead of ←.
-            if (showBack && LocalSideBar.current != null) SideBarButton()
+            if (navigation != null) navigation()
+            else if (showBack && LocalSideBar.current != null) SideBarButton()
             else if (showBack) IconButton(onClick = { nav.pop() }, shapes = IconButtonDefaults.shapes()) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
         },
         actions = actions,
