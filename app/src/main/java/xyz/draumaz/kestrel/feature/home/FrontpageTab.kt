@@ -1,6 +1,8 @@
 package xyz.draumaz.kestrel.feature.home
 
 import xyz.draumaz.kestrel.ui.SearchIcon
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.VideoLibrary
 import xyz.draumaz.kestrel.feature.feed.openMediaBrowser
 import xyz.draumaz.kestrel.ui.switchThumb
@@ -24,6 +26,8 @@ import xyz.draumaz.kestrel.feature.feed.showTopPanel
 import xyz.draumaz.kestrel.feature.feed.PanelButton
 import xyz.draumaz.kestrel.feature.feed.PanelOuter
 import xyz.draumaz.kestrel.feature.feed.PanelInner
+import xyz.draumaz.kestrel.feature.feed.CollapsingTitleBar
+import xyz.draumaz.kestrel.feature.feed.rememberCollapsingTitle
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.offset
@@ -90,6 +94,7 @@ import xyz.draumaz.kestrel.settings.PostDisplay
 import xyz.draumaz.kestrel.settings.TopBarMode
 import xyz.draumaz.kestrel.settings.TopBarMenuItem
 import xyz.draumaz.kestrel.settings.topBarMenu
+import androidx.compose.foundation.layout.RowScope
 
 @Composable
 internal fun currentUsername(): String {
@@ -123,27 +128,24 @@ internal fun FrontpageTab(selected: Boolean) {
     var hideReadRequests by remember { mutableIntStateOf(0) } // the Hide read posts floating button
     // Reloading starts a new list from the top; returning to the tab shows the bar too.
     val loaded = rememberFeedController(feedKey).ui.collectAsStateWithLifecycle().value is FeedUi.Data
-    LaunchedEffect(loaded, selected) { if (!loaded || selected) bar.slide(0f) }
+    // (Only a switch to it, not Back from a post, which rebuilds the tab too: #238.)
+    var wasSelected by rememberSaveable { mutableStateOf(selected) }
+    LaunchedEffect(loaded, selected) {
+        if (!loaded || (selected && !wasSelected)) bar.slide(0f)
+        wasSelected = selected
+    }
 
     // Full mode: Google-app style search bar with avatar.
     val actionRow: @Composable () -> Unit = {
         // The menu, without what's already in this bar (#78).
         FullTopBar(username) { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }, compact = true) }
     }
-    // The title row: the bar itself in Expandable mode; Full mode scrolls it with the feed.
+    // Full mode's title row, which scrolls with the feed (the feed insets it 7dp).
     val titleRow: @Composable () -> Unit = {
         Row(
-            Modifier.fillMaxWidth().padding(
-                // With the ☰ there, line it up with the other tabs' (4dp + the button's own inset).
-                // The feed (or, in Expandable mode, the bar) already insets it 7dp.
-                start = if (expandable && LocalSideBar.current != null) 0.dp else 16.dp,
-                top = if (expandable) (if (LocalSideBar.current != null) 8.dp else 10.dp) else 8.dp,
-                end = if (expandable) 4.dp else 16.dp,
-            ),
+            Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, end = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Full mode has it in the action row above.
-            if (expandable) SideBarButton(Modifier.offset(x = (-3).dp))
             Text(
                 if (postsAll) "r/all" else if (homeOn) "Home" else if (blend) "Blend" else if (forYou) "For You" else "Frontpage",
                 style = MaterialTheme.typography.titleLarge,
@@ -162,16 +164,13 @@ internal fun FrontpageTab(selected: Boolean) {
             } else {
                 Spacer(Modifier.weight(1f))
             }
-            // Expandable mode: search right here, and one button that floats the toolbar in.
-            if (expandable) {
-                IconButton(onClick = { nav.push(Route.Search()) }) { Icon(SearchIcon, "Search") }
-                IconButton(onClick = { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }) }) {
-                    Icon(Icons.Rounded.MoreHoriz, "Toolbar")
-                }
-            }
         }
     }
-    Box(Modifier.fillMaxSize().clipToBounds().nestedScroll(bar).nestedScroll(fab)) {
+    // Expandable (#214): the big title that folds into the bar as the feed scrolls.
+    val collapsing = rememberCollapsingTitle { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }
+    // It folds first, then the folded bar slides away as before (#226): the hiding bar
+    // inside it only sees the scroll the feed itself takes.
+    Box(Modifier.fillMaxSize().clipToBounds().then(if (expandable) Modifier.nestedScroll(collapsing) else Modifier).nestedScroll(bar).nestedScroll(fab)) {
         PostListView(
             feedKey = feedKey,
             postsTab = true,
@@ -183,8 +182,22 @@ internal fun FrontpageTab(selected: Boolean) {
             // Right under the bar when it's fully out, off the top when it's gone.
             floatingChipsY = if (!settings.floatingChips) null else bar::chipsY,
         )
-        HidingTopBar(bar, Modifier.statusBarsPadding().padding(horizontal = if (expandable) 7.dp else 0.dp)) {
-            if (expandable) titleRow() else actionRow()
+        if (expandable) HidingTopBar(bar, Modifier.statusBarsPadding()) {
+            CollapsingTitleBar(
+                collapsing,
+                if (postsAll) "r/all" else if (homeOn) "Home" else if (blend) "Blend" else if (forYou) "For You" else "Frontpage",
+                subtitle = if (!homeOn && forYou) (if (blend) blendSubtitle(blendState) else "On your phone") else null,
+                hasNavigation = LocalSideBar.current != null,
+                underStatusBar = false,
+                navigation = { SideBarButton() },
+            ) {
+                IconButton(onClick = { nav.push(Route.Search()) }) { Icon(SearchIcon, "Search") }
+                IconButton(onClick = { showFloatingToolbar(nav, username, { openMediaBrowser(nav, feedKey, listState) }) }) {
+                    Icon(Icons.Rounded.MoreHoriz, "Toolbar")
+                }
+            }
+        } else {
+            HidingTopBar(bar, Modifier.statusBarsPadding()) { actionRow() }
         }
         FeedFab(
             // The Full bar's own New post button already does it: not two of them.
@@ -273,6 +286,35 @@ private fun RoundSearchBar(username: String, onAvatar: () -> Unit) {
             }
         }
         BarAvatar(username, onAvatar)
+    }
+}
+
+/**
+ * The Full bar on Inbox and Profile (#214): the ☰, the round search bar as on Posts and
+ * Explore with that tab's [placeholder], and the tab's own buttons after it ([actions]).
+ */
+@Composable
+internal fun TabSearchBar(placeholder: String, onSearch: () -> Unit, actions: @Composable RowScope.() -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val sideBar = LocalSideBar.current != null
+    Row(
+        Modifier.fillMaxWidth().padding(start = if (sideBar) 4.dp else 16.dp, top = 4.dp, end = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SideBarButton()
+        // The same field as Home's bar at the moment: with its New post button, the pill
+        // with a magnifier; without, Gmail's round one with the words in the middle.
+        val settings by app.settings.state.collectAsStateWithLifecycle()
+        if (settings.fullBarNewPost) {
+            SearchPill(placeholder, onClick = onSearch, modifier = Modifier.weight(1f))
+        } else {
+            Surface(Modifier.weight(1f).height(56.dp), shape = CircleShape, color = cs.surfaceContainerHigh) {
+                Box(Modifier.fillMaxSize().clickable(onClickLabel = placeholder, onClick = onSearch), contentAlignment = Alignment.Center) {
+                    Text(placeholder, color = cs.onSurfaceVariant, fontSize = 16.sp, maxLines = 1)
+                }
+            }
+        }
+        actions()
     }
 }
 

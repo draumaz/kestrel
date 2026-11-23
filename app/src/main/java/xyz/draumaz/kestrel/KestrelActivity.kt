@@ -23,6 +23,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -158,6 +159,7 @@ class KestrelActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        xyz.draumaz.kestrel.feature.digest.DigestNotifications.reschedule(this, keep = true)
         // Keep the splash up until the stored session is read (one keystore read).
         splash.setKeepOnScreenCondition { app.session.state.value == SessionState.Loading }
         enableEdgeToEdge(
@@ -289,6 +291,7 @@ class KestrelActivity : ComponentActivity() {
         super.onStop()
         // The hidden Reddit Home page keeps running its scripts otherwise.
         app.forYou.redditHome.onAppBackground()
+        app.forYou.flush() // For You's batched stats: Android may end the app from here
         Analytics.flushPostsOpened()
     }
 
@@ -600,6 +603,12 @@ private fun AppNavHost(controller: NavHostController, start: Route) {
         screen<Route.CustomFeeds> { CustomFeedsScreen() }
         screen<Route.History> { HistoryScreen() }
         screen<Route.Summaries> { SummariesScreen() }
+        screen<Route.Inbox> {
+            Box(Modifier.statusBarsPadding()) {
+                xyz.draumaz.kestrel.feature.inbox.InboxScreen(reselect = 0, pushed = true)
+            }
+        }
+        screen<Route.Digest> { xyz.draumaz.kestrel.feature.digest.DigestScreen() }
         screen<Route.Saved> { SavedScreen() }
         screen<Route.Offline> { OfflineScreen() }
         screen<Route.NotificationActivity> { NotificationActivityScreen() }

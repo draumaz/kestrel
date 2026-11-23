@@ -45,6 +45,7 @@ import xyz.draumaz.kestrel.feature.media.canShareAsMedia
 import androidx.compose.material.icons.outlined.PermMedia
 import androidx.compose.material.icons.outlined.ThumbDown
 import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.AddComment
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -425,13 +426,14 @@ private fun <T> ComposeSheet(
  * The post overflow sheet: share, save offline, hide, copy, report,
  * block, crosspost, open in browser, mod actions, Tune For You.
  */
-fun showPostActionsSheet(post: Post) {
-    Overlays.launch { done -> PostActionsSheet(post, done) }
+/** [onComment]: the thread's, which puts "New comment" first (#225). */
+fun showPostActionsSheet(post: Post, onComment: (() -> Unit)? = null) {
+    Overlays.launch { done -> PostActionsSheet(post, onComment, done) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PostActionsSheet(post: Post, done: () -> Unit) {
+private fun PostActionsSheet(post: Post, onComment: (() -> Unit)?, done: () -> Unit) {
     // Subscribed: Reddit's list can arrive while the sheet is open.
     val showFewerIds by app.forYou.redditHome.showFewerIds.collectAsStateWithLifecycle()
     val sheet = rememberModalBottomSheetState()
@@ -461,6 +463,8 @@ private fun PostActionsSheet(post: Post, done: () -> Unit) {
     val seen = app.history.contains(post.id)
     ModalBottomSheet(onDismissRequest = done, sheetState = sheet) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding()) {
+            // In a thread: with the floating button off (Settings › Thread buttons), here.
+            if (onComment != null) MenuGroup { act(Icons.Rounded.AddComment, "New comment") { onComment() } }
             MenuGroup {
                 act(Icons.Outlined.Share, "Share link") {
                     // Sharing is a strong interest signal.
@@ -632,7 +636,8 @@ private val reportReasons = listOf(
 )
 
 /** Report dialog: preset reasons or a custom one. Works for posts and comments. */
-suspend fun showReportDialog(fullname: String) {
+/** Reports [fullname] (a post or comment), or what [send] reports (a user, #221). */
+suspend fun showReportDialog(fullname: String, send: (suspend (String) -> Unit)? = null) {
     val reason = Overlays.show<String> { done ->
         var selected by remember { mutableStateOf<String?>(null) }
         var custom by remember { mutableStateOf("") }
@@ -672,7 +677,7 @@ suspend fun showReportDialog(fullname: String) {
         )
     } ?: return
     try {
-        app.repository.report(fullname, reason)
+        if (send != null) send(reason) else app.repository.report(fullname, reason)
         snack("Reported. Thanks.")
     } catch (e: Exception) {
         snack("Could not report: ${errorText(e)}")

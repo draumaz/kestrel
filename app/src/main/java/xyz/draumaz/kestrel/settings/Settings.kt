@@ -30,6 +30,7 @@ import xyz.draumaz.kestrel.data.TopTime
 enum class AppFont(val key: String, val label: String, val description: String) {
     ROBOTO("roboto", "Roboto", "Android's default"),
     GOOGLE_SANS("googlesans", "Google Sans", "The typeface of Google's own apps"),
+    GOOGLE_SANS_FLEX("googlesansflex", "Google Sans Flex", "Material 3 Expressive's: rounded titles, plain text to read"),
     JAKARTA("jakarta", "Plus Jakarta Sans", "Rounder, with Unbounded for headlines");
 
     companion object {
@@ -54,7 +55,7 @@ enum class PaletteStyle(val label: String) {
 /** Where the Posts-screen actions (search, new post, profile) live. Persisted by index. */
 enum class TopBarMode(val label: String, val description: String) {
     FULL("Full top bar", "Search, new post and profile across the top (current)"),
-    EXPANDABLE("Expandable", "Just a title with one button that floats the full top bar in on demand"),
+    EXPANDABLE("Expandable", "A big title that shrinks into the bar as you scroll, with search and ⋯ beside it"),
 }
 
 /**
@@ -237,6 +238,21 @@ data class Settings(
     val postsTabAll: Boolean = false, // the Posts tab shows r/all instead of the frontpage, which Explore's All button opens then
     val blendHome: Boolean = false, // with forYouFeed + Reddit Home allowed: "Blend (Beta)", For You ranking over your Reddit Home too
     val blendReddit: Int = 1, // Blend: Reddit ↔ Kestrel — 0 mostly Kestrel, 1 balanced, 2 mostly Reddit
+    // The Digest (docs/digest-spec.md). Its communities are per account (DigestModule).
+    val digestEnabled: Boolean = false,
+    val digestSize: Int = 1, // DigestSize index: 0 Brief, 1 Standard, 2 Everything notable
+    val digestPlace: Int = 0, // 0 a chip on Posts, 1 a bottom tab, 2 menu only
+    val digestShowRead: Boolean = false, // the Digest keeps read posts (dimmed) instead of hiding them
+    val digestAi: Boolean = false, // the AI picks and explains (never on unless the user turns it on)
+    val digestOverview: Boolean = false, // with the AI: a paragraph about the day on top
+    val digestAiBuilds: Int = 1, // which builds use the AI: 0 every build, 1 the day's first and Rebuild (refreshes stay quick)
+    val digestAiPick: Boolean = true, // with the AI: it picks the posts (off: the numbers pick)
+    val digestAiWhy: Boolean = true, // with the AI: it writes each post's "why"
+    val digestLanguage: String? = null, // the AI's language for the Digest; null = as AI summaries
+    val digestNotify: Boolean = false, // a daily notification at digestTime
+    val digestTime: Int = 480, // minutes after midnight, local (08:00)
+    val digestSwipe: Int = 0, // which swipe marks read in the Digest: 0 left, 1 right, 2 both
+    val digestOrder: Int = 0, // DigestOrder index: 0 Most notable, 1 Most upvoted, 2 Newest, 3 AI's assessment
     // Experimental Reddit Home: the user accepted its risk warning (allowed),
     // and the frontpage currently shows it (feed).
     val redditHomeAllowed: Boolean = false,
@@ -251,6 +267,11 @@ data class Settings(
     val feedKeepMinutes: Int = 30, // how long the frontpage keeps its posts before returning to it reloads
     val hiddenPostDays: Int = 7, // how long Kestrel keeps posts you hid out of every feed (Reddit hides them too)
     val textScale: Double = 1.0, // global text size multiplier (0.8–1.4)
+    // #234: on top of textScale, for post titles, post text (feed previews and the post's
+    // body) and comment text; 1.0 = as before.
+    val titleTextScale: Double = 1.0,
+    val postTextScale: Double = 1.0,
+    val commentTextScale: Double = 1.0,
     val autoplayMedia: Boolean = true, // autoplay videos/GIFs in feeds
     val autoplaySound: Boolean = false, // feed videos start unmuted (#23)
     val viewerMuted: Boolean = false, // full-screen videos start muted (#51)
@@ -273,6 +294,7 @@ data class Settings(
     val topBarMenuFull: List<TopBarMenuEntry> = TopBarMenuItem.parse(null, TopBarMode.FULL),
     val navLabels: Boolean = true, // show text labels on the bottom nav bar
     val navStyle: Int = 0, // 0 bottom bar, 1 side bar, 2 both (#25)
+    val inboxInProfile: Boolean = false, // Inbox opens from Profile's top bar instead of being a tab
     val sideBarItems: List<SideBarEntry> = SideBarItem.parse(null), // the side bar's entries under its tabs, and their order (#109)
     val exploreSections: List<ExploreEntry> = ExploreSection.parse(null), // Explore's sections, and their order (#161)
     val navOutline: Boolean = true, // thin outline around the floating bottom bar (#29)

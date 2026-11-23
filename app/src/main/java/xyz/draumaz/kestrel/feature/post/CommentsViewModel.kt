@@ -35,6 +35,8 @@ data class PostThread(
 data class ThreadUiState(
     val thread: PostThread? = null,
     val loading: Boolean = true,
+    /** The first page is shown and the full one is on its way (a long thread). */
+    val fullPagePending: Boolean = false,
     val refreshing: Boolean = false,
     val error: Throwable? = null,
     val sort: String = "",
@@ -178,6 +180,9 @@ class CommentsViewModel(
             val latest = s.thread ?: return@update s
             s.copy(thread = PostThread(full.post, app.commentVotes.apply(full.comments), latest.collapsed + autoMod))
         }
+        // The first page's commenters have theirs (or are asked for): the rest now (#217).
+        val avatarSort = sort
+        viewModelScope.launch { app.authorAvatars.loadRest(postId, avatarSort, full.comments) }
     }
 
     private fun load(showLoading: Boolean) {
@@ -192,12 +197,13 @@ class CommentsViewModel(
                 val (t, more) = build()
                 val shown = _state.value
                 _state.value = ThreadUiState(
-                    thread = t, loading = false, sort = sort,
+                    thread = t, loading = false, sort = sort, fullPagePending = more,
                     translateTargets = shown.translateTargets, translation = shown.translation, translatedTo = shown.translatedTo,
                 )
                 if (language == null) detectLanguage(t) else shown.translatedTo?.let(::translate)
                 if (more) {
                     loadFullPage()
+                    _state.update { it.copy(fullPagePending = false) }
                     _state.value.translatedTo?.let(::translate)
                 }
             } catch (e: CancellationException) {
@@ -374,8 +380,9 @@ class CommentsViewModel(
         for (c in CommentTree.flatten(comments, emptySet())) {
             if (c.isMore || c.id in skip) continue
             when {
-                // Pinned bot comments too (#202): a bot by its name, as Reddit's own say.
-                autoMod && (c.author == "AutoModerator" || (c.stickied && c.author.endsWith("bot", ignoreCase = true))) -> out += c.id
+                // And every pinned comment (#216): bots' (#202), whatever their name
+                // (u/qualityvote2), and the mods' notes, a tap away.
+                autoMod && (c.author == "AutoModerator" || c.stickied) -> out += c.id
                 below != null && c.score < below && !c.scoreHidden && !c.author.equals(me, ignoreCase = true) -> out += c.id
                 s.collapseTopLevel && c.depth == 0 && c.replies.any { !it.isMore } -> out += CommentTree.folded(c.id)
             }
@@ -424,6 +431,7 @@ class CommentsViewModel(
                     CommentTree.replaceMore(_state.value.thread?.comments ?: s.comments, moreNode, app.commentVotes.apply(flat))
                 }
                 edit { it.withTree(tree).copy(loadingMore = it.loadingMore - moreNode.fullname) }
+                viewModelScope.launch { app.authorAvatars.loadAuthors(flat) } // #217
                 _state.value.translatedTo?.let(::translate)
             } catch (e: CancellationException) {
                 throw e

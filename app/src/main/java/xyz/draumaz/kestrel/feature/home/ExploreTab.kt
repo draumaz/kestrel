@@ -20,6 +20,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.IntrinsicSize
+import xyz.draumaz.kestrel.feature.feed.CollapsingTitleBar
+import xyz.draumaz.kestrel.feature.feed.rememberCollapsingTitle
 import coil3.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -261,7 +263,10 @@ internal fun ExploreTab() {
         }
     }
 
-    Box(Modifier.fillMaxSize().clipToBounds().nestedScroll(bar)) {
+    // Expandable (#214): the big title that folds into the bar as the list scrolls.
+    val collapsing = rememberCollapsingTitle { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }
+    // It folds first, then the folded bar slides away as before (#226).
+    Box(Modifier.fillMaxSize().clipToBounds().then(if (expandable) Modifier.nestedScroll(collapsing) else Modifier).nestedScroll(bar)) {
     val barHeight = with(LocalDensity.current) { bar.height.toDp() }
     RefreshBox(
         isRefreshing = refreshing,
@@ -496,19 +501,16 @@ internal fun ExploreTab() {
             if (subs !is Async.Data) order.drop(filterAt).filter { !it.isCommunityList }.forEach { place(it) }
         }
     }
-    HidingTopBar(bar, Modifier.statusBarsPadding().padding(horizontal = if (expandable) 7.dp else 0.dp)) {
-        if (expandable) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = if (sideBar) 0.dp else 16.dp, top = if (sideBar) 8.dp else 10.dp, end = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SideBarButton(Modifier.offset(x = (-3).dp))
-                Text("Explore", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+    if (expandable) {
+        HidingTopBar(bar, Modifier.statusBarsPadding()) {
+            CollapsingTitleBar(collapsing, "Explore", hasNavigation = sideBar, underStatusBar = false, navigation = { SideBarButton() }) {
                 IconButton(onClick = { nav.push(Route.Search()) }) { Icon(SearchIcon, "Search communities & posts") }
                 // The side bar always has Settings (#145).
                 if (!sideBar) SettingsButton()
             }
-        } else {
+        }
+    } else {
+        HidingTopBar(bar, Modifier.statusBarsPadding()) {
             // Home's Full bar (#172): your picture opens its menu, less Browse media (a feed's).
             FullTopBar(currentUser()) { showFloatingToolbar(nav, currentUser(), null, compact = true) }
         }

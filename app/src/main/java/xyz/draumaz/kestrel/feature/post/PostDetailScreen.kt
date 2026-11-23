@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.post
 
+import xyz.draumaz.kestrel.ui.theme.ScaledText
+import xyz.draumaz.kestrel.ui.theme.TextKind
 import androidx.compose.material.icons.outlined.EmojiEvents
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -120,6 +122,7 @@ import xyz.draumaz.kestrel.ui.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -276,7 +279,8 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
     val listState = rememberLazyListState(cacheWindow = LazyLayoutCacheWindow(ahead = 900.dp, behind = 300.dp))
     val scope = rememberCoroutineScope()
     // Reopens where you left off (#179); a link to one comment opens on that comment instead.
-    if (focusCommentId == null) ThreadPosition(postId, listState, flat)
+    var backNotice by remember { mutableStateOf(false) }
+    if (focusCommentId == null) ThreadPosition(postId, listState, flat, settled = !ui.loading && !ui.fullPagePending) { backNotice = true }
     val haptic = LocalHapticFeedback.current
 
     // In-post comment search. Matches by fullname, not list position:
@@ -408,7 +412,7 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
                                 Icon(if (searchOpen) Icons.Rounded.SearchOff else SearchIcon, "Search comments")
                             }
                         }
-                        IconButton(onClick = { showPostActionsSheet(thread.post) }) { Icon(Icons.Rounded.MoreVert, "More") }
+                        IconButton(onClick = { showPostActionsSheet(thread.post, onComment = actions::replyToPost) }) { Icon(Icons.Rounded.MoreVert, "More") }
                         if (username.isNotEmpty() && thread.post.author == username) OwnPostMenu(thread.post, vm, nav)
                     }
                 },
@@ -497,6 +501,12 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
                     }
                 }
             }
+            BackWhereYouLeftOff(
+                backNotice,
+                listState,
+                onTop = { backNotice = false; scope.launch { listState.animateScrollToItem(0) } },
+                onDone = { backNotice = false },
+            )
             if (searchOpen && thread != null) {
                 SearchBar(
                     query = query,
@@ -514,29 +524,36 @@ fun PostDetailScreen(subreddit: String, postId: String, focusCommentId: String?)
 
 /**
  * Where you were in a thread (#179): reopening it scrolls back to the comment that was at
- * the top of the screen, once the comments are in, with "Top" to go back up. Saved as you
- * leave, or when Android stops the app; at the top, it's forgotten.
+ * the top of the screen, once the comments are in, with "Top" to go back up ([onResumed]).
+ * Saved as you leave, or when Android stops the app; at the top, it's forgotten.
  */
 @Composable
-private fun ThreadPosition(postId: String, listState: LazyListState, flat: List<Comment>) {
-    val nav = LocalNavigator.current
-    val scope = rememberCoroutineScope()
+private fun ThreadPosition(postId: String, listState: LazyListState, flat: List<Comment>, settled: Boolean, onResumed: () -> Unit) {
     val resumeAt = remember(postId) { app.threadVisits.lastPosition(postId) }
     // Once a visit: not again on coming back from a profile or a link opened from here.
     var resumed by rememberSaveable(postId) { mutableStateOf(resumeAt == null) }
-    LaunchedEffect(flat.isNotEmpty()) {
+    LaunchedEffect(flat, settled) {
         if (resumed || flat.isEmpty() || resumeAt == null) return@LaunchedEffect
-        resumed = true
         val i = flat.indexOfFirst { it.fullname == resumeAt.first }
-        if (i < 0) return@LaunchedEffect // gone, or folded away: the top, as before
+        if (i < 0) {
+            // A long thread shows its first page, then the full one: a comment further
+            // down (where the jump buttons often lead, #223) is only in that. Until it's
+            // in, wait; after, it's gone or folded away: the top, as before.
+            if (settled) resumed = true
+            return@LaunchedEffect
+        }
+        resumed = true
         listState.scrollToItem(i + 1, resumeAt.second) // the post's header is item 0
-        nav.showSnackbar("Back where you left off", actionLabel = "Top") { scope.launch { listState.animateScrollToItem(0) } }
+        onResumed()
     }
     fun save() {
         // Still loading: nothing new to save, and the last position stays.
         if (!resumed) return
-        val key = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.key as? String
-        if (listState.firstVisibleItemIndex == 0 || key == null || !key.startsWith("t1_")) {
+        // The row at the top and how far it's scrolled past, from the same row (the
+        // first of visibleItemsInfo can be the one above it, inside the list's padding).
+        val index = listState.firstVisibleItemIndex
+        val key = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }?.key as? String
+        if (index == 0 || key == null || !key.startsWith("t1_")) {
             app.threadVisits.recordPosition(postId, null, 0)
         } else {
             app.threadVisits.recordPosition(postId, key, listState.firstVisibleItemScrollOffset)
@@ -544,6 +561,27 @@ private fun ThreadPosition(postId: String, listState: LazyListState, flat: List<
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { save() }
     DisposableEffect(postId) { onDispose { save() } }
+}
+
+/**
+ * "Back where you left off · Top", at the top of the thread for a few seconds or until you
+ * scroll. It was a snackbar, which covered the thread's buttons at the bottom (#223).
+ */
+@Composable
+private fun BoxScope.BackWhereYouLeftOff(visible: Boolean, listState: LazyListState, onTop: () -> Unit, onDone: () -> Unit) {
+    val dragged by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(visible, dragged) {
+        if (!visible) return@LaunchedEffect
+        if (dragged) onDone() else { delay(4000); onDone() }
+    }
+    AnimatedVisibility(visible, Modifier.align(Alignment.TopCenter).padding(top = 8.dp), enter = fadeIn(), exit = fadeOut()) {
+        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, shadowElevation = 3.dp) {
+            Row(Modifier.padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Back where you left off", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                TextButton(onClick = onTop) { Text("Top") }
+            }
+        }
+    }
 }
 
 /** Pause/resume reading time with the screen; learn when another screen covers it. */
@@ -732,6 +770,10 @@ private class ThreadActions(val vm: CommentsViewModel, val nav: AppNavigator, va
         scope.launch { confirmBlockUser(c.author) }
     }
 
+    fun report(c: Comment) {
+        scope.launch { showReportDialog(c.fullname) }
+    }
+
     fun mod(c: Comment, doneMsg: String, action: suspend (xyz.draumaz.kestrel.data.RedditRepository) -> Unit) {
         scope.launch {
             if (!modAction(doneMsg, action)) return@launch
@@ -754,7 +796,14 @@ private fun CommentList(
     val flat = thread.flat
     // Animated images in the thread pause while it scrolls (see rememberPauseWhileScrolling).
     val scrolling = remember(listState) { { listState.isScrollInProgress } }
-    val icons by app.authorAvatars.icons.collectAsState()
+    val found by app.authorAvatars.icons.collectAsState()
+    // Your own picture is known without asking: a reply you just posted has it too (#215).
+    val me by app.feed.me.collectAsState()
+    LaunchedEffect(username, settings.commentAvatars) { if (username.isNotEmpty() && settings.commentAvatars) app.feed.loadMe() }
+    val icons = remember(found, me, username) {
+        val mine = me?.iconUrl?.takeIf { username.isNotEmpty() && username.lowercase() !in found }
+        if (mine == null) found else found + (username.lowercase() to mine)
+    }
     CompositionLocalProvider(LocalListScrolling provides scrolling, LocalAuthorIcons provides if (settings.commentAvatars) icons else emptyMap()) {
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -1181,7 +1230,7 @@ private fun PostHeader(post: Post, fresh: Boolean, translate: (@Composable (Dp) 
             }
         }
         Spacer(Modifier.height(12.dp))
-        Text(p.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, lineHeight = 1.3.em))
+        ScaledText(TextKind.TITLE) { Text(p.title, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, lineHeight = 1.3.em)) }
         p.linkFlair?.let {
             Spacer(Modifier.height(8.dp))
             xyz.draumaz.kestrel.feature.feed.Flair(it)
@@ -1324,14 +1373,16 @@ private fun CalmPostHeader(
                 }
             }
         }
-        Text(
-            p.title,
-            Modifier.padding(top = 14.dp),
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Normal,
-            lineHeight = 1.2.em,
-            letterSpacing = (-0.01).em,
-        )
+        ScaledText(TextKind.TITLE) {
+            Text(
+                p.title,
+                Modifier.padding(top = 14.dp),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Normal,
+                lineHeight = 1.2.em,
+                letterSpacing = (-0.01).em,
+            )
+        }
         p.linkFlair?.let { CalmFlair(it, Modifier.padding(top = 8.dp)) }
         p.crosspostFrom?.let { from ->
             Spacer(Modifier.height(8.dp))
@@ -1409,9 +1460,12 @@ private fun PostMedia(p: Post, nav: AppNavigator, radius: androidx.compose.ui.un
     val blur = (p.over18 && blurNsfw.blurNsfw) || p.spoiler
     val label = if (p.over18) "NSFW" else "Spoiler"
     if (p.type == PostType.GALLERY && p.gallery.isNotEmpty()) {
-        NsfwBlur(blur, Modifier.padding(bottom = 12.dp), label = label) {
-            if (p.gallery.size > 1) GalleryM3Carousel(p.gallery, title = p.title)
-            else GalleryCarousel(p.gallery, if (radius != 16.dp) Modifier.clip(RoundedCornerShape(radius)) else Modifier, title = p.title)
+        // A spoiler / NSFW gallery covers each image, as in the feed (#229, #165): it still
+        // swipes, and the first tap reveals them all.
+        val cover = if (blur) label else null
+        Box(Modifier.padding(bottom = 12.dp)) {
+            if (p.gallery.size > 1) GalleryM3Carousel(p.gallery, title = p.title, cover = cover)
+            else GalleryCarousel(p.gallery, if (radius != 16.dp) Modifier.clip(RoundedCornerShape(radius)) else Modifier, title = p.title, cover = cover)
         }
         return
     }
@@ -1662,7 +1716,7 @@ private fun CommentTile(
                     // heavier to build while scrolling through hundreds of
                     // comments (and swallows taps for tap-to-collapse).
                     // "Copy text" is in the ⋯ menu.
-                    BodyWithMedia(comment.body, comment.media, nav, maxMedia = 3)
+                    ScaledText(TextKind.COMMENT) { BodyWithMedia(comment.body, comment.media, nav, maxMedia = 3) }
                 }
                 CommentActionsRow(comment, isOwn, actions)
             } else {
@@ -1777,6 +1831,9 @@ private fun CommentActionsRow(c: Comment, isOwn: Boolean, actions: ThreadActions
         IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) { Icon(icon, desc, Modifier.size(18.dp), tint = tint) }
     }
 
+    // Deep in a thread the row is narrow: "Reply" loses its word so ⋯ stays on screen (#215).
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val compact = maxWidth < 300.dp
     Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         small(Icons.Rounded.ArrowUpward, "Upvote", if (up) votes.up else cs.onSurfaceVariant, up) { actions.vote(c, 1) }
         Text(
@@ -1792,9 +1849,11 @@ private fun CommentActionsRow(c: Comment, isOwn: Boolean, actions: ThreadActions
             modifier = Modifier.heightIn(min = 36.dp),
             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = cs.onSurfaceVariant),
         ) {
-            Icon(Icons.AutoMirrored.Rounded.Reply, null, Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Reply", fontSize = 12.5.sp)
+            Icon(Icons.AutoMirrored.Rounded.Reply, if (compact) "Reply" else null, Modifier.size(16.dp))
+            if (!compact) {
+                Spacer(Modifier.width(6.dp))
+                Text("Reply", fontSize = 12.5.sp)
+            }
         }
         Spacer(Modifier.weight(1f))
         small(Icons.Rounded.UnfoldLess, "Collapse thread", cs.onSurfaceVariant) { actions.toggle(c) }
@@ -1813,6 +1872,7 @@ private fun CommentActionsRow(c: Comment, isOwn: Boolean, actions: ThreadActions
                 }
             }
         }
+    }
     }
 }
 
@@ -1866,7 +1926,10 @@ private fun ColumnScope.CommentMenuItems(
             DropdownMenuItem(text = { Text("Share as image") }, onClick = { pick { actions.shareImage(c) } })
         }
         if (!isOwn && c.author != "[deleted]") {
-            add { DropdownMenuItem(text = { Text("Block u/${c.author}") }, onClick = { pick { actions.block(c) } }) }
+            add {
+                DropdownMenuItem(text = { Text("Report") }, onClick = { pick { actions.report(c) } }) // #221, as iOS
+                DropdownMenuItem(text = { Text("Block u/${c.author}") }, onClick = { pick { actions.block(c) } })
+            }
         }
         // Moderators of this community (the post says so) can act on comments too.
         if (actions.post?.canModPost == true) {
@@ -2100,9 +2163,13 @@ private fun CalmCommentRow(
                     .padding(top = 4.dp)
                     .then(if (tapToCollapse) Modifier.clickable(indication = null, interactionSource = null, onClick = toggle) else Modifier),
             ) {
-                BodyWithMedia(comment.body, comment.media, nav, maxMedia = 3)
+                ScaledText(TextKind.COMMENT) { BodyWithMedia(comment.body, comment.media, nav, maxMedia = 3) }
             }
-            // ↑ score ↓ · Reply · Collapse · ⋯ — small, 32dp targets.
+            // ↑ score ↓ · Reply · Collapse · ⋯ — small, 32dp targets. Deep in a thread the row
+            // is narrow: the words go, the icons stay, so ⋯ (Edit, Delete…) isn't pushed off
+            // the edge (#215: a reply you'd just posted, often the deepest, had none).
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val compact = maxWidth < 300.dp
             Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 val muted = cs.onSurfaceVariant
                 // A vote colours its arrow and the score, with no circle behind it (#141).
@@ -2127,13 +2194,15 @@ private fun CalmCommentRow(
                         .padding(horizontal = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.AutoMirrored.Rounded.Reply, null, Modifier.size(16.dp), tint = muted)
-                    Spacer(Modifier.width(4.dp))
-                    Text("Reply", fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = muted)
+                    Icon(Icons.AutoMirrored.Rounded.Reply, if (compact) "Reply" else null, Modifier.size(16.dp), tint = muted)
+                    if (!compact) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("Reply", fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = muted)
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 if (comment.saved) Icon(Icons.Rounded.Bookmark, "Saved", Modifier.size(16.dp), tint = cs.primary)
-                CollapsePill(Icons.Rounded.UnfoldLess, "Collapse", toggle)
+                CollapsePill(Icons.Rounded.UnfoldLess, "Collapse", toggle, compact)
                 Box {
                     Box(Modifier.size(32.dp).clip(CircleShape).clickable { menu = true }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Rounded.MoreHoriz, "More", Modifier.size(16.dp), tint = muted)
@@ -2146,13 +2215,14 @@ private fun CalmCommentRow(
                     }
                 }
             }
+            }
         }
     }
 }
 
 /** Calm thread's collapse / expand control: a labelled tonal pill, easy to spot and hit. */
 @Composable
-private fun CollapsePill(icon: ImageVector, label: String, onClick: () -> Unit) {
+private fun CollapsePill(icon: ImageVector, label: String, onClick: () -> Unit, compact: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     Row(
         Modifier
@@ -2161,12 +2231,15 @@ private fun CollapsePill(icon: ImageVector, label: String, onClick: () -> Unit) 
             .clip(RoundedCornerShape(14.dp))
             .background(cs.secondaryContainer)
             .clickable(onClickLabel = label, onClick = onClick)
-            .padding(start = 8.dp, end = 10.dp),
+            .padding(start = 8.dp, end = if (compact) 8.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(16.dp), tint = cs.onSecondaryContainer)
-        Spacer(Modifier.width(4.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onSecondaryContainer)
+        // [compact]: just the icon, in a narrow row.
+        Icon(icon, if (compact) label else null, Modifier.size(16.dp), tint = cs.onSecondaryContainer)
+        if (!compact) {
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = cs.onSecondaryContainer)
+        }
     }
 }
 
@@ -2203,7 +2276,7 @@ private fun PostBody(p: Post) {
     // A spoiler's text stays covered until tapped (#204), as on reddit.com.
     var shown by rememberSaveable(p.id) { mutableStateOf(!p.spoiler) }
     if (!shown) return xyz.draumaz.kestrel.feature.feed.SpoilerTextCover { shown = true }
-    BodyWithMedia(p.selftext, p.bodyMedia, LocalNavigator.current, maxMedia = 10, selectable = true)
+    ScaledText(TextKind.POST_TEXT) { BodyWithMedia(p.selftext, p.bodyMedia, LocalNavigator.current, maxMedia = 10, selectable = true) }
 }
 
 /**

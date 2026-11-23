@@ -84,6 +84,21 @@ class SettingsStore(private val p: Prefs) {
             autoHideReadForYou = b("autoHideReadForYou", d.autoHideReadForYou),
             blendHome = b("blendHome", d.blendHome),
             blendReddit = (p.getInt("blendReddit") ?: d.blendReddit).coerceIn(0, 2),
+            digestEnabled = b("digestEnabled", d.digestEnabled),
+            digestSize = (p.getInt("digestSize") ?: d.digestSize).coerceIn(0, 2),
+            // 0 the Posts chip, 1 a bottom tab, 2 menu only; anything else: the chip.
+            digestPlace = (p.getInt("digestPlace") ?: d.digestPlace).let { if (it in 0..2) it else 0 },
+            digestShowRead = b("digestShowRead", d.digestShowRead),
+            digestAi = b("digestAi", d.digestAi),
+            digestOverview = b("digestOverview", d.digestOverview),
+            digestOrder = (p.getInt("digestOrder") ?: d.digestOrder).coerceIn(0, 3),
+            digestSwipe = (p.getInt("digestSwipe") ?: d.digestSwipe).coerceIn(0, 2),
+            digestAiBuilds = (p.getInt("digestAiBuilds") ?: d.digestAiBuilds).coerceIn(0, 1),
+            digestAiPick = b("digestAiPick", d.digestAiPick),
+            digestAiWhy = b("digestAiWhy", d.digestAiWhy),
+            digestLanguage = p.getString("digestLanguage"),
+            digestNotify = b("digestNotify", d.digestNotify),
+            digestTime = (p.getInt("digestTime") ?: d.digestTime).coerceIn(0, 24 * 60 - 1),
             forYouDiscovery = (p.getInt("forYouDiscovery") ?: d.forYouDiscovery).coerceIn(-2, 2),
             midResThumbnails = b("midResThumbnails", d.midResThumbnails),
             subsCacheEnabled = b("subsCacheEnabled", d.subsCacheEnabled),
@@ -93,6 +108,9 @@ class SettingsStore(private val p: Prefs) {
             feedKeepMinutes = p.getInt("feedKeepMinutes") ?: d.feedKeepMinutes,
             hiddenPostDays = p.getInt("hiddenPostDays") ?: d.hiddenPostDays,
             textScale = p.getDouble("textScale") ?: d.textScale,
+            titleTextScale = (p.getDouble("titleTextScale") ?: d.titleTextScale).coerceIn(0.8, 1.6),
+            postTextScale = (p.getDouble("postTextScale") ?: d.postTextScale).coerceIn(0.8, 1.6),
+            commentTextScale = (p.getDouble("commentTextScale") ?: d.commentTextScale).coerceIn(0.8, 1.6),
             autoplayMedia = b("autoplayMedia", d.autoplayMedia),
             autoplaySound = b("autoplaySound", d.autoplaySound),
             viewerMuted = b("viewerMuted", d.viewerMuted),
@@ -117,6 +135,7 @@ class SettingsStore(private val p: Prefs) {
             topBarMenuExpandable = TopBarMenuItem.parse(p.getStringList(TopBarMenuItem.prefsKey(TopBarMode.EXPANDABLE)), TopBarMode.EXPANDABLE),
             topBarMenuFull = TopBarMenuItem.parse(p.getStringList(TopBarMenuItem.prefsKey(TopBarMode.FULL)), TopBarMode.FULL),
             navLabels = b("navLabels", d.navLabels),
+            inboxInProfile = b("inboxInProfile", d.inboxInProfile),
             navStyle = (p.getInt("navStyle") ?: d.navStyle).coerceIn(0, 2),
             sideBarItems = SideBarItem.parse(p.getStringList(SideBarItem.PREFS_KEY)),
             exploreSections = ExploreSection.parse(p.getStringList(ExploreSection.PREFS_KEY)),
@@ -203,6 +222,20 @@ class SettingsStore(private val p: Prefs) {
 
     fun setBlendHome(v: Boolean) { p.setBool("blendHome", v); set { it.copy(blendHome = v) } }
     fun setBlendReddit(v: Int) { p.setInt("blendReddit", v); set { it.copy(blendReddit = v) } }
+    fun setDigestEnabled(v: Boolean) { p.setBool("digestEnabled", v); set { it.copy(digestEnabled = v) } }
+    fun setDigestSize(v: Int) { p.setInt("digestSize", v); set { it.copy(digestSize = v) } }
+    fun setDigestPlace(v: Int) { p.setInt("digestPlace", v); set { it.copy(digestPlace = v) } }
+    fun setDigestShowRead(v: Boolean) { p.setBool("digestShowRead", v); set { it.copy(digestShowRead = v) } }
+    fun setDigestAi(v: Boolean) { p.setBool("digestAi", v); set { it.copy(digestAi = v) } }
+    fun setDigestOverview(v: Boolean) { p.setBool("digestOverview", v); set { it.copy(digestOverview = v) } }
+    fun setDigestSwipe(v: Int) { p.setInt("digestSwipe", v); set { it.copy(digestSwipe = v) } }
+    fun setDigestOrder(v: Int) { p.setInt("digestOrder", v); set { it.copy(digestOrder = v) } }
+    fun setDigestAiBuilds(v: Int) { p.setInt("digestAiBuilds", v); set { it.copy(digestAiBuilds = v) } }
+    fun setDigestAiPick(v: Boolean) { p.setBool("digestAiPick", v); set { it.copy(digestAiPick = v) } }
+    fun setDigestAiWhy(v: Boolean) { p.setBool("digestAiWhy", v); set { it.copy(digestAiWhy = v) } }
+    fun setDigestLanguage(v: String?) { if (v == null) p.remove("digestLanguage") else p.setString("digestLanguage", v); set { it.copy(digestLanguage = v) } }
+    fun setDigestNotify(v: Boolean) { p.setBool("digestNotify", v); set { it.copy(digestNotify = v) } }
+    fun setDigestTime(v: Int) { p.setInt("digestTime", v); set { it.copy(digestTime = v) } }
     fun setAutoHideReadForYou(v: Boolean) { p.setBool("autoHideReadForYou", v); set { it.copy(autoHideReadForYou = v) } }
     fun setForYouDiscovery(v: Int) { p.setInt("forYouDiscovery", v); set { it.copy(forYouDiscovery = v) } }
     fun setAppFont(v: AppFont) {
@@ -261,6 +294,15 @@ class SettingsStore(private val p: Prefs) {
     fun setFeedKeepMinutes(v: Int) { p.setInt("feedKeepMinutes", v); set { it.copy(feedKeepMinutes = v) } }
     fun setHiddenPostDays(v: Int) { p.setInt("hiddenPostDays", v); set { it.copy(hiddenPostDays = v) } }
     fun setTextScale(v: Double) { p.setDouble("textScale", v); set { it.copy(textScale = v) } }
+    fun setTitleTextScale(v: Double) { p.setDouble("titleTextScale", v); set { it.copy(titleTextScale = v) } }
+    fun setPostTextScale(v: Double) { p.setDouble("postTextScale", v); set { it.copy(postTextScale = v) } }
+    fun setCommentTextScale(v: Double) { p.setDouble("commentTextScale", v); set { it.copy(commentTextScale = v) } }
+
+    /** All text sizes back to normal: the app's and the three on top of it. */
+    fun resetTextScales() {
+        for (k in listOf("textScale", "titleTextScale", "postTextScale", "commentTextScale")) p.remove(k)
+        set { it.copy(textScale = 1.0, titleTextScale = 1.0, postTextScale = 1.0, commentTextScale = 1.0) }
+    }
     fun setAutoplayMedia(v: Boolean) { p.setBool("autoplayMedia", v); set { it.copy(autoplayMedia = v) } }
     fun setAutoplaySound(v: Boolean) { p.setBool("autoplaySound", v); set { it.copy(autoplaySound = v) } }
     fun setViewerMuted(v: Boolean) { p.setBool("viewerMuted", v); set { it.copy(viewerMuted = v) } }
@@ -286,6 +328,7 @@ class SettingsStore(private val p: Prefs) {
         set { if (mode == TopBarMode.EXPANDABLE) it.copy(topBarMenuExpandable = next) else it.copy(topBarMenuFull = next) }
     }
     fun setNavLabels(v: Boolean) { p.setBool("navLabels", v); set { it.copy(navLabels = v) } }
+    fun setInboxInProfile(v: Boolean) { p.setBool("inboxInProfile", v); set { it.copy(inboxInProfile = v) } }
     fun setNavStyle(v: Int) { p.setInt("navStyle", v); set { it.copy(navStyle = v) } }
     /** [entries] null: back to the default side bar (and whatever entries later versions add to it). */
     fun setSideBarItems(entries: List<SideBarEntry>?) {

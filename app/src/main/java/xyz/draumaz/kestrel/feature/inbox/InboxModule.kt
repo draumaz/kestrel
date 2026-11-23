@@ -296,6 +296,8 @@ class InboxModule(private val c: AppContainer) : UserScoped {
                 val post = intent.getStringExtra(InboxNotifications.EXTRA_POST_ID)
                 openFromNotification(if (sub != null && post != null) Route.Post(sub, post) else null, inbox = false)
             }
+            // The daily Digest: open it where you are.
+            xyz.draumaz.kestrel.feature.digest.DigestNotifications.TARGET -> openFromNotification(Route.Digest, inbox = false)
             InboxNotifications.TARGET_MESSAGE ->
                 openFromNotification(intent.getStringExtra(InboxNotifications.EXTRA_MESSAGE)?.let { Route.MessageThread(it) }, inbox = true)
             // A Reddit app notification Kestrel took over: find its post / comment first.
@@ -330,7 +332,9 @@ class InboxModule(private val c: AppContainer) : UserScoped {
                         nav.viewers.clear()
                         Overlays.dismissAll()
                         nav.controller.popBackStack<Route.Home>(inclusive = false)
-                        if (inbox) app.feed.openTab.value = 2
+                        if (inbox) {
+                            if (app.settings.value.inboxInProfile) nav.push(Route.Inbox) else app.feed.openTab.value = 2
+                        }
                         route?.let(nav::push)
                     }
                     return@launch

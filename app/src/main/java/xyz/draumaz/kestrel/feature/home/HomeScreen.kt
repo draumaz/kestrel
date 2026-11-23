@@ -3,6 +3,8 @@ package xyz.draumaz.kestrel.feature.home
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material.icons.rounded.Star
 import xyz.draumaz.kestrel.ui.pageFill
+import androidx.compose.material.icons.rounded.Newspaper
+import androidx.compose.material.icons.outlined.Newspaper
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.outlined.Schedule
@@ -44,6 +46,8 @@ import xyz.draumaz.kestrel.settings.SideBarItem
 import androidx.compose.material3.MotionScheme
 import xyz.draumaz.kestrel.feature.about.maybeShowWhatsNew
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.layout.onPlaced
@@ -114,6 +118,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.border
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -147,7 +154,20 @@ private val navItems = listOf(
     NavItem(Icons.Outlined.Explore, Icons.Rounded.Explore, "Explore"),
     NavItem(Icons.Rounded.MailOutline, Icons.Rounded.Mail, "Inbox"),
     NavItem(Icons.Outlined.AccountCircle, Icons.Rounded.AccountCircle, "Profile"),
+    NavItem(Icons.Outlined.Newspaper, Icons.Rounded.Newspaper, "Digest"), // 4: Settings › Show Digest in › Bottom tab
 )
+
+/**
+ * The tabs shown, in order (by their index in [navItems], which never changes): the
+ * Digest's after Explore when it's a tab, Inbox unless it's in Profile.
+ */
+internal fun tabOrder(s: xyz.draumaz.kestrel.settings.Settings, signedIn: Boolean): List<Int> = buildList {
+    add(0)
+    add(1)
+    if (s.digestEnabled && s.digestPlace == 1 && signedIn) add(4)
+    if (!s.inboxInProfile) add(2)
+    add(3)
+}
 
 /** The home shell: Posts / Explore / Inbox / Profile tabs with the floating "Pop" pill nav. */
 @Composable
@@ -172,6 +192,15 @@ fun HomeScreen() {
         maybeShowWhatsNew()
         maybeSuggestNotifications()
     }
+
+    // Inbox in Profile turned on while on Inbox: to Profile, where it now lives;
+    // the Digest's tab gone while on it: to Posts.
+    val signedIn = app.session.session?.anonymous == false
+    val order = tabOrder(settings, signedIn)
+    LaunchedEffect(order) {
+        if (index !in order) index = if (index == 2) 3 else 0
+    }
+    val digestReselect by app.feed.tabReselect(4).collectAsStateWithLifecycle()
 
     // A notification tap asks for a tab (Inbox).
     val openTab by app.feed.openTab.collectAsStateWithLifecycle()
@@ -209,8 +238,9 @@ fun HomeScreen() {
     val scrollConnection = remember(turnAfter) {
         object : NestedScrollConnection {
             // How far each tab's list is from its top, tracked from the
-            // scroll deltas (lists start at the top; null = unknown).
-            val fromTop = arrayOfNulls<Float>(4).apply { fill(0f) }
+            // scroll deltas (lists start at the top; null = unknown). Snapshot state,
+            // so whether Back leaves the app follows it (#230).
+            val fromTop = mutableStateListOf<Float?>(0f, 0f, 0f, 0f, 0f)
             var direction = 0 // last user direction: -1 down the list, 1 up, 0 idle
             var travelDir = 0 // the way the finger is going now, and how far it has gone
             var travel = 0f
@@ -279,7 +309,15 @@ fun HomeScreen() {
     // leave instead).
     // Sheets, viewers and pushed screens register their own, later handlers,
     // which take precedence.
-    BackHandler {
+    // When Back would leave the app (Back leaves the app on, Posts, nothing left to do:
+    // the conditions below), this handler steps aside and Android does it, with its own
+    // predictive back-to-home animation (#230).
+    val backLeaves by remember {
+        derivedStateOf {
+            settings.backLeavesApp && !drawer.isOpen && index == 0 && (scrollConnection.nearTop() || !settings.backScrollsToTop)
+        }
+    }
+    BackHandler(enabled = !backLeaves) {
         if (drawer.isOpen) {
             shellScope.launch { drawer.close() }
         } else if (sideBar) {
@@ -343,7 +381,7 @@ fun HomeScreen() {
     Box(Modifier.fillMaxSize().background(pageFill(MaterialTheme.colorScheme.surface))) {
         KeepAliveTabs(
             selected = index,
-            count = 4,
+            count = 5,
             composeAll = allTabs,
             modifier = Modifier.fillMaxSize().nestedScroll(scrollConnection),
         ) { i ->
@@ -352,13 +390,15 @@ fun HomeScreen() {
                 0 -> FrontpageTab(selected = index == 0)
                 1 -> ExploreTab() // runs under the status bar, with its own fade (#127)
                 2 -> Box(Modifier.statusBarsPadding()) { InboxScreen(reselect = inboxReselect, selected = index == 2) }
+                // Only while it's a tab (it was built for everyone).
+                4 -> if (4 in order) xyz.draumaz.kestrel.feature.digest.DigestScreen(tab = true, selected = index == 4, reselect = digestReselect)
                 else -> Box(Modifier.statusBarsPadding()) { ProfileTab() }
             }
         }
         // Content fades out just below the status bar, rather than being cut off (#74).
         // (Posts and Explore have their own, softer one.)
         val fade = MaterialTheme.colorScheme.surface
-        if (index >= 2) Box(
+        if (index == 2 || index == 3) Box(
             Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
@@ -381,6 +421,8 @@ fun HomeScreen() {
         FloatingNav(
             selected = index,
             unread = unread,
+            order = order,
+            inboxInProfile = settings.inboxInProfile,
             showLabels = settings.navLabels,
             outline = settings.navOutline,
             modifier = Modifier
@@ -557,8 +599,9 @@ private fun SideBar(selected: Int, current: Route?, unread: Int, open: Boolean, 
                     }
                 }
             }
-            navItems.forEachIndexed { i, item ->
-                if (i == 3 && username != null) return@forEachIndexed
+            for (i in tabOrder(settings, username != null)) {
+                val item = navItems[i]
+                if (i == 3 && username != null) continue
                 NavigationDrawerItem(
                     label = { Text(item.label) },
                     icon = { Icon(if (i == selected) item.on else item.off, null) },
@@ -568,6 +611,15 @@ private fun SideBar(selected: Int, current: Route?, unread: Int, open: Boolean, 
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp, horizontal = 16.dp))
+            // The Digest, while it's on: first, as it's a daily read (with the tabs when it's one).
+            if (settings.digestEnabled && settings.digestPlace != 1 && username != null) {
+                NavigationDrawerItem(
+                    label = { Text("Digest") },
+                    icon = { Icon(if (current == Route.Digest) Icons.Rounded.Newspaper else Icons.Outlined.Newspaper, null) },
+                    selected = current == Route.Digest,
+                    onClick = { onPick { if (current != Route.Digest) nav.openFromSideBar(Route.Digest) } },
+                )
+            }
             var afterList = false // the last thing shown was a subreddit list
             for ((item, shown) in settings.sideBarItems) {
                 if (!shown) continue
@@ -666,6 +718,8 @@ private fun KeepAliveTabs(
 private fun FloatingNav(
     selected: Int,
     unread: Int,
+    order: List<Int>,
+    inboxInProfile: Boolean,
     showLabels: Boolean,
     outline: Boolean,
     onSelected: (Int) -> Unit,
@@ -677,8 +731,16 @@ private fun FloatingNav(
     val haptic = LocalHapticFeedback.current
     // Each tab's horizontal span in the row, for drag hit-testing.
     val spans = remember { arrayOfNulls<ClosedFloatingPointRange<Float>>(navItems.size) }
+    // A tab that left the bar keeps no span to be dragged onto.
+    LaunchedEffect(order) { for (i in spans.indices) if (i !in order) spans[i] = null }
     val current by rememberUpdatedState(selected)
     val select by rememberUpdatedState(onSelected)
+    // Your picture as the Profile tab's icon, signed in (#219).
+    val session by app.session.state.collectAsStateWithLifecycle()
+    val me by app.feed.me.collectAsStateWithLifecycle()
+    val signedIn = app.session.username.isNotEmpty()
+    LaunchedEffect(session, signedIn) { if (signedIn) app.feed.loadMe() }
+    val avatar = me?.iconUrl?.takeIf { signedIn }
     Box(modifier.navigationBarsPadding().padding(bottom = 20.dp)) {
         Surface(
             Modifier
@@ -710,11 +772,19 @@ private fun FloatingNav(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                navItems.forEachIndexed { i, item ->
+                val digestUnread = if (4 in order) xyz.draumaz.kestrel.feature.digest.rememberDigestUnread() else 0
+                // Inbox in Profile: no Inbox tab, and Profile carries its badge.
+                for (i in order) {
+                    val item = navItems[i]
                     NavButton(
                         item = item,
                         selected = selected == i,
-                        badge = if (i == 2) unread else 0,
+                        badge = when (i) {
+                            (if (inboxInProfile) 3 else 2) -> unread
+                            4 -> digestUnread
+                            else -> 0
+                        },
+                        avatar = if (i == 3) avatar else null,
                         showLabel = showLabels,
                         onClick = { onSelected(i) },
                         modifier = Modifier.onPlaced { c ->
@@ -733,6 +803,7 @@ private fun NavButton(
     item: NavItem,
     selected: Boolean,
     badge: Int,
+    avatar: String?,
     showLabel: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -753,7 +824,17 @@ private fun NavButton(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val icon: @Composable () -> Unit = {
-            Icon(if (selected) item.on else item.off, item.label, Modifier.size(24.dp), tint = contentColor)
+            if (avatar != null) {
+                // Ringed in the tab's colour, so selected still reads as selected.
+                AsyncImage(
+                    avatar,
+                    item.label,
+                    Modifier.size(26.dp).clip(CircleShape).border(1.5.dp, contentColor, CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Icon(if (selected) item.on else item.off, item.label, Modifier.size(24.dp), tint = contentColor)
+            }
         }
         if (badge > 0) {
             BadgedBox(badge = { Badge { Text(if (badge > 99) "99+" else "$badge") } }) { icon() }

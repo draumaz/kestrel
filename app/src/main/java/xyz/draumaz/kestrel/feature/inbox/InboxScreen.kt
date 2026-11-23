@@ -5,6 +5,7 @@ import xyz.draumaz.kestrel.feature.home.SideBarEdge
 import xyz.draumaz.kestrel.feature.feed.FabScroll
 import xyz.draumaz.kestrel.feature.feed.CollapsingFab
 import xyz.draumaz.kestrel.feature.feed.rememberFabScroll
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import xyz.draumaz.kestrel.ui.ConnectedChoice
 import xyz.draumaz.kestrel.ui.RefreshBox
@@ -107,12 +108,17 @@ import xyz.draumaz.kestrel.nav.NavCache
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.ui.friendlyError
 import xyz.draumaz.kestrel.feature.post.confirmDelete
+import androidx.compose.foundation.layout.RowScope
+import xyz.draumaz.kestrel.feature.home.TabSearchBar
+import xyz.draumaz.kestrel.feature.feed.CollapsingTitleBar
+import xyz.draumaz.kestrel.feature.feed.rememberCollapsingTitle
+import xyz.draumaz.kestrel.settings.TopBarMode
 import kotlinx.coroutines.launch
 
 /** The Inbox tab. [reselect] bumps when the tab is re-tapped (scroll to top). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InboxScreen(reselect: Int, selected: Boolean = true) {
+fun InboxScreen(reselect: Int, selected: Boolean = true, /** A page of its own (Inbox in Profile), with ←. */ pushed: Boolean = false) {
     val nav = LocalNavigator.current
     val session by app.session.state.collectAsStateWithLifecycle()
     val anonymous = (session as? SessionState.LoggedIn)?.session?.anonymous == true
@@ -162,16 +168,19 @@ fun InboxScreen(reselect: Int, selected: Boolean = true) {
     }
 
     val fab = rememberFabScroll()
+    val settings by app.settings.state.collectAsStateWithLifecycle()
+    val collapsing = rememberCollapsingTitle {
+        val l = lists[pager.currentPage]
+        l.firstVisibleItemIndex == 0 && l.firstVisibleItemScrollOffset == 0
+    }
     val openSideBar = LocalSideBar.current
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     Scaffold(
+        // Expandable: scrolling a list folds the title first (only that mode shows it).
+        modifier = if (settings.topBarMode == TopBarMode.FULL) Modifier else Modifier.nestedScroll(collapsing),
         topBar = {
             Column {
-                TopAppBar(
-                    title = title,
-                    navigationIcon = { SideBarButton() },
-                    colors = appBarColors,
-                    actions = {
+                val barActions: @Composable RowScope.() -> Unit = {
                         if (webSignIn) {
                             IconButton(onClick = { nav.push(Route.RedditWeb(RedditWeb.CHAT, "Chat")) }) {
                                 Icon(Icons.AutoMirrored.Outlined.Chat, "Reddit Chat")
@@ -189,8 +198,27 @@ fun InboxScreen(reselect: Int, selected: Boolean = true) {
                         }) { Icon(Icons.Outlined.MarkEmailRead, "Mark all read") }
                         // The side bar always has Settings (#145).
                         if (openSideBar == null) SettingsButton()
-                    },
-                )
+                }
+                // Settings › Appearance › Top bar, as Posts and Explore (#214): Full, the
+                // round search bar with Inbox's buttons after it; Expandable, the title.
+                if (pushed) {
+                    // A page of its own: its title, with ← (no search bar: that's the tabs').
+                    CollapsingTitleBar(
+                        collapsing, "Inbox", hasNavigation = true, underStatusBar = false,
+                        navigation = {
+                            IconButton(onClick = { nav.pop() }) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") }
+                        },
+                        actions = barActions,
+                    )
+                } else if (settings.topBarMode == TopBarMode.FULL) {
+                    TabSearchBar("Search Reddit", onSearch = { nav.push(Route.Search()) }, actions = barActions)
+                } else {
+                    // Expandable: the big title that folds into the bar as the list scrolls.
+                    CollapsingTitleBar(
+                        collapsing, "Inbox", hasNavigation = openSideBar != null, underStatusBar = false,
+                        navigation = { SideBarButton() }, actions = barActions,
+                    )
+                }
                 PrimaryScrollableTabRow(
                     selectedTabIndex = pager.currentPage,
                     edgePadding = 0.dp,

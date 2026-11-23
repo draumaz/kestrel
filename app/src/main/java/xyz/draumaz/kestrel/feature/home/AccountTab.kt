@@ -3,6 +3,9 @@ package xyz.draumaz.kestrel.feature.home
 import xyz.draumaz.kestrel.settings.SideBarItem
 import xyz.draumaz.kestrel.feature.feed.MenuGroup
 import xyz.draumaz.kestrel.feature.feed.MenuLabel
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material.icons.rounded.MailOutline
 
 import xyz.draumaz.kestrel.feature.feed.UserProfileBody
 import androidx.compose.material3.AssistChipDefaults
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.automirrored.rounded.Login
 import androidx.compose.material.icons.automirrored.rounded.Logout
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Newspaper
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.OfflinePin
@@ -77,6 +81,8 @@ import xyz.draumaz.kestrel.feature.feed.TapGuard
 import xyz.draumaz.kestrel.nav.LocalNavigator
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.ui.Overlays
+import xyz.draumaz.kestrel.ui.SearchIcon
+import xyz.draumaz.kestrel.settings.TopBarMode
 import kotlinx.coroutines.launch
 
 /**
@@ -99,13 +105,36 @@ internal fun ProfileTab() {
         // Lined up with Home's title row (#153): it sits in the feed's 7dp inset, its ☰
         // nudged 3dp out, 10dp down without the side bar.
         val sideBar = LocalSideBar.current != null
-        Row(
-            Modifier.fillMaxWidth().padding(start = if (sideBar) 7.dp else 23.dp, top = if (sideBar) 8.dp else 10.dp, end = 11.dp),
+        val settings by app.settings.state.collectAsStateWithLifecycle()
+        val signedOut = anonymous || username.isEmpty()
+        if (settings.topBarMode == TopBarMode.FULL) {
+            // As Posts and Explore (#214): the round search bar, here for your own posts
+            // (Reddit's search finds posts by author, not comments), then the ⋯ menu.
+            TabSearchBar(
+                if (signedOut) "Search Reddit" else "Search your posts",
+                onSearch = { nav.push(if (signedOut) Route.Search() else Route.Search(query = "author:$username")) },
+            ) {
+                // The side bar always has Settings (#138).
+                if (signedOut) {
+                    if (!sideBar) SettingsButton()
+                } else {
+                    if (settings.inboxInProfile) InboxButton()
+                    YourStuffMenu()
+                }
+            }
+        } else Row(
+            // The buttons 4dp from the edge, as the other tabs' bars (#236).
+            Modifier.fillMaxWidth().padding(start = if (sideBar) 7.dp else 20.dp, top = if (sideBar) 8.dp else 10.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             SideBarButton(Modifier.offset(x = (-3).dp))
             Text("Profile", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            if (anonymous || username.isEmpty()) {
+            if (!signedOut && settings.inboxInProfile) InboxButton()
+            // As the other tabs' (#228): your own posts, or Reddit signed out.
+            IconButton(onClick = { nav.push(if (signedOut) Route.Search() else Route.Search(query = "author:$username")) }) {
+                Icon(SearchIcon, if (signedOut) "Search Reddit" else "Search your posts")
+            }
+            if (signedOut) {
                 // The side bar always has Settings (#138).
                 if (LocalSideBar.current == null) SettingsButton()
             } else {
@@ -139,6 +168,18 @@ internal fun ProfileTab() {
     }
 }
 
+/** Settings › Inbox in Profile: the envelope opening Inbox, with its unread count. */
+@Composable
+private fun InboxButton() {
+    val nav = LocalNavigator.current
+    val unread by app.inbox.unreadCount.collectAsStateWithLifecycle()
+    IconButton(onClick = { nav.push(Route.Inbox) }) {
+        BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else "$unread") } }) {
+            Icon(Icons.Rounded.MailOutline, "Inbox")
+        }
+    }
+}
+
 /**
  * The ⋯ menu (#144): History, Read later, Drafts, Summaries and saved search, and
  * Settings. With the side bar on, the ones it already shows are left out (#139);
@@ -153,6 +194,7 @@ private fun YourStuffMenu() {
     val sideBar = LocalSideBar.current != null
     val inSideBar = if (!sideBar) emptySet() else settings.sideBarItems.filter { it.shown }.map { it.item }.toSet()
     val actions = listOfNotNull(
+        MenuAction(Icons.Rounded.Newspaper, "Digest", half = true) { nav.push(Route.Digest) }.takeIf { settings.digestEnabled && settings.digestPlace != 1 && !sideBar },
         MenuAction(Icons.Rounded.History, "History", half = true) { nav.push(Route.History) }.takeIf { SideBarItem.HISTORY !in inSideBar },
         MenuAction(Icons.Rounded.OfflinePin, "Read later", half = true) { nav.push(Route.Offline) }.takeIf { SideBarItem.OFFLINE !in inSideBar },
         MenuAction(Icons.Rounded.EditNote, if (drafts == 0) "Drafts" else "Drafts · $drafts", half = true) { nav.push(Route.Drafts) }.takeIf { SideBarItem.DRAFTS !in inSideBar },

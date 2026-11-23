@@ -78,6 +78,8 @@ import xyz.draumaz.kestrel.nav.AppNavigator
 import xyz.draumaz.kestrel.nav.LocalNavigator
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.ui.friendlyError
+import xyz.draumaz.kestrel.feature.post.showReportDialog
+import androidx.compose.material.icons.outlined.Flag
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -123,6 +125,9 @@ fun UserScreen(username: String) {
                     }
                     IconButton(onClick = { nav.share("https://reddit.com/user/$username") }) { Icon(Icons.Outlined.Share, "Share") }
                     if (!isSelf) {
+                        IconButton(onClick = { scope.launch { showReportDialog("u/$username") { app.repository.reportUser(username, it) } } }) {
+                            Icon(Icons.Outlined.Flag, "Report user") // #221
+                        }
                         IconButton(onClick = { scope.launch { confirmBlockUser(username) } }) {
                             Icon(Icons.Rounded.Block, "Block user")
                         }

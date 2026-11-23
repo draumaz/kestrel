@@ -1,7 +1,20 @@
 package xyz.draumaz.kestrel.feature.settings
 
+import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.MailOutline
 import androidx.compose.material.icons.automirrored.rounded.Notes
 import xyz.draumaz.kestrel.feature.inbox.InboxNotifications
+import androidx.compose.material.icons.outlined.DynamicFeed
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.PermMedia
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Translate
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.FormatPaint
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.AccountCircle
@@ -101,7 +114,6 @@ import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.ThumbsUpDown
-import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.UnfoldLess
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
@@ -114,7 +126,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.OpenInBrowser
 import androidx.compose.material.icons.rounded.Image
-import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Speed
@@ -194,6 +205,18 @@ import xyz.draumaz.kestrel.feature.media.MediaFolderSettingRow
 import xyz.draumaz.kestrel.nav.LocalNavigator
 import xyz.draumaz.kestrel.feature.home.LocalSideBar
 import xyz.draumaz.kestrel.feature.home.SideBarButton
+import xyz.draumaz.kestrel.feature.digest.DigestSize
+import xyz.draumaz.kestrel.feature.digest.DigestOrder
+import xyz.draumaz.kestrel.feature.digest.DigestNotifications
+import xyz.draumaz.kestrel.feature.digest.setDigestNotify
+import xyz.draumaz.kestrel.feature.digest.pickDigestTime
+import xyz.draumaz.kestrel.feature.digest.digestCommunitiesLabel
+import xyz.draumaz.kestrel.feature.digest.editDigestCommunities
+import xyz.draumaz.kestrel.feature.digest.setDigestEnabled
+import xyz.draumaz.kestrel.feature.digest.showDigestExplainer
+import androidx.compose.material.icons.outlined.Newspaper
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.rounded.Reorder
 import xyz.draumaz.kestrel.nav.Route
 import xyz.draumaz.kestrel.settings.CommentStyle
@@ -254,22 +277,23 @@ private const val CUSTOM_MODEL = "\u0000custom"
 /** The main page's categories (#68), in groups: a section of the list, what's in it, its icon. */
 private val SETTINGS_CATEGORIES = listOf(
     listOf(
-        Triple("Feed", "Layout, sort, For You, what's hidden", Icons.Rounded.DynamicFeed),
-        Triple("Appearance", "Theme, font, app icon, navigation", Icons.Rounded.Palette),
-        Triple("Posts & comments", "Comment style, collapsing, swipes", Icons.Rounded.Forum),
-        Triple("Media", "Autoplay, NSFW blur, saving", Icons.Rounded.PermMedia),
+        Triple("Feed", "Layout, sort, For You, what's hidden", Icons.Outlined.DynamicFeed),
+        Triple("Digest", "The day's notable posts from your communities", Icons.Outlined.Newspaper),
+        Triple("Appearance", "Theme, font, app icon, navigation", Icons.Outlined.Palette),
+        Triple("Posts & comments", "Comment style, collapsing, swipes", Icons.Outlined.Forum),
+        Triple("Media", "Autoplay, NSFW blur, saving", Icons.Outlined.PermMedia),
     ),
     listOf(
-        Triple("Notifications", "Inbox alerts", Icons.Rounded.Notifications),
-        Triple("Translation", "Languages and service", Icons.Rounded.Translate),
-        Triple("AI summaries", "Key, model, style", Icons.Rounded.AutoAwesome),
+        Triple("Notifications", "Inbox alerts", Icons.Outlined.Notifications),
+        Triple("Translation", "Languages and service", Icons.Outlined.Translate),
+        Triple("AI summaries", "Key, model, style", Icons.Outlined.AutoAwesome),
     ),
     listOf(
-        Triple("Data & storage", "History, cache, backup", Icons.Rounded.Storage),
-        Triple("Account & keys", "Login, API keys, clear data", Icons.Rounded.ManageAccounts),
-        Triple("Power-user features", "API usage", Icons.Rounded.Tune),
+        Triple("Data & storage", "History, cache, backup", Icons.Outlined.Storage),
+        Triple("Account & keys", "Login, API keys, clear data", Icons.Outlined.ManageAccounts),
+        Triple("Power-user features", "API usage", Icons.Outlined.Tune),
     ),
-    listOf(Triple("About", "Version, licenses", Icons.Rounded.Info)),
+    listOf(Triple("About", "Version, licenses", Icons.Outlined.Info)),
 )
 
 /** Settings: the categories, or the one [section] (a page of its own). */
@@ -310,6 +334,7 @@ fun SettingsList(
 ) {
     val s by app.settings.state.collectAsStateWithLifecycle()
     val ctrl = app.settings
+    val digestChosen by app.digest.chosen.collectAsStateWithLifecycle()
     val nav = LocalNavigator.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -396,11 +421,38 @@ fun SettingsList(
             "Posts tab shows r/all", "Instead of your frontpage, which Explore's All button opens then. For You, Blend and Reddit Home don't apply.",
             Icons.Rounded.Public, s.postsTabAll, ctrl::setPostsTabAll,
         )
-        // What Home shows, as the chips at its top (#199): picking Best there turns it off.
-        switch(
-            "Home shows For You",
-            "Your personalized frontpage, built on your phone. Same as picking For You at the top of Home",
-            Icons.Rounded.AutoAwesome, s.forYouFeed, ctrl::setForYouFeed,
+        // Which feed the Posts tab shows: the same choice as the chips at its top, and
+        // picking here does what tapping one does (saves it and reloads the feed). It
+        // was two switches, "Home shows For You / Blend", which read like settings of
+        // the Home chip and didn't reload anything.
+        val homeOn = s.redditHomeAllowed
+        val feedNow = when {
+            homeOn && s.redditHomeFeed -> "home"
+            homeOn && s.forYouFeed && s.blendHome -> "blend"
+            s.forYouFeed -> "foryou"
+            else -> "subs"
+        }
+        val feedOptions = buildList {
+            add(PickOption("foryou", "For You", "Ranked on your phone from your subscriptions, what you engage with and more"))
+            if (homeOn) add(PickOption("blend", "Blend (Beta)", "For You, with your Reddit Home's recommendations ranked in"))
+            if (homeOn) add(PickOption("home", "Reddit Home", "Your reddit.com Home, as Reddit ranks it"))
+            add(PickOption("subs", "Subscriptions", "Your subscriptions, sorted ${s.defaultSort.label}"))
+        }
+        tile(
+            "Posts tab feed",
+            if (s.postsTabAll) "r/all, while Posts tab shows r/all is on" else feedOptions.first { it.value == feedNow }.label,
+            Icons.Rounded.AutoAwesome,
+            onClick = launch {
+                val pick = pickOption(feedOptions, feedNow) ?: return@launch
+                if (pick == feedNow) return@launch
+                val front = app.feed.controller("")
+                when (pick) {
+                    "foryou" -> front.selectForYou()
+                    "blend" -> front.selectBlend()
+                    "home" -> front.selectRedditHome()
+                    else -> front.changeSort(s.defaultSort)
+                }
+            },
         )
         switch(
             "Auto-hide read items in \"For You\"", "Hide posts you've marked/opened as read",
@@ -425,14 +477,6 @@ fun SettingsList(
             )
         })
         if (s.redditHomeAllowed) {
-            switch(
-                "Home shows Blend (Beta)",
-                "For You also ranks your Reddit Home: Reddit's recommendations, under your For You choices. Same as picking Blend on Home",
-                Icons.Rounded.Merge, s.forYouFeed && s.blendHome,
-            ) { v ->
-                ctrl.setBlendHome(v)
-                if (v) ctrl.setForYouFeed(true)
-            }
             if (s.forYouFeed && s.blendHome) {
                 val blendLabels = listOf("Mostly Kestrel", "Balanced", "Mostly Reddit")
                 val blendHints = listOf(
@@ -505,11 +549,117 @@ fun SettingsList(
         ) { showHiddenSubsDialog() }
         divider("feed")
 
+        // ---------------------------------------------------------------- Digest
+        section("Digest")
+        tile("How Digest works", "What it shows, how it picks, where you'll find it", Icons.Outlined.Info, onClick = launch {
+            showDigestExplainer(ask = false)
+        })
+        switch(
+            "Digest", "The posts that stood out today in the communities you choose",
+            Icons.Outlined.Newspaper, s.digestEnabled,
+        ) { on -> scope.launch { setDigestEnabled(on) } }
+        if (s.digestEnabled) {
+            tile("Communities", digestCommunitiesLabel(digestChosen), Icons.Outlined.Groups, onClick = launch { editDigestCommunities() })
+            val size = DigestSize.of(s.digestSize)
+            tile("Size", size.label, Icons.Outlined.Tune, onClick = launch {
+                pickOption(DigestSize.entries.map { PickOption(it.ordinal, it.label, it.description) }, s.digestSize)
+                    ?.let(ctrl::setDigestSize)
+            })
+            val places = listOf(
+                PickOption(0, "Posts chip", "A Digest chip at the top of Posts, after your feeds"),
+                PickOption(1, "Bottom tab", "A Digest tab after Explore; Inbox moves into Profile"),
+                PickOption(2, "Menu only", "In the side bar and the Profile ⋯ menu"),
+            )
+            tile("Show Digest in", places.first { it.value == s.digestPlace }.label, Icons.Outlined.Place, onClick = launch {
+                val place = pickOption(places, s.digestPlace) ?: return@launch
+                // A fifth tab crowds the bar: Inbox moves into Profile, and they're told where it went.
+                if (place == 1 && !s.inboxInProfile) {
+                    infoDialog(
+                        "Inbox moves to Profile",
+                        "To keep the bottom bar uncluttered, Digest takes Inbox's place there, and Inbox moves into Profile: " +
+                            "the envelope at the top of Profile opens it, with your unread count.\n\n" +
+                            "You can bring it back as a tab in Settings › Appearance › Inbox in Profile.",
+                        close = "Got it",
+                    )
+                    ctrl.setInboxInProfile(true)
+                }
+                val leftTab = s.digestPlace == 1 && place != 1
+                ctrl.setDigestPlace(place)
+                // No Digest tab any more: room for Inbox again, if they want it back.
+                if (leftTab && s.inboxInProfile && confirmDialog(
+                        "Bring Inbox back as a tab?",
+                        "Digest no longer has a tab, so there's room for Inbox in the bottom bar again.",
+                        "Bring it back", cancel = "Keep in Profile",
+                    )
+                ) ctrl.setInboxInProfile(false)
+            })
+            val sides = listOf(
+                PickOption(0, "Left", "Swipe left to mark read; right keeps your own swipe"),
+                PickOption(1, "Right", "Swipe right to mark read; left keeps your own swipe"),
+                PickOption(2, "Both sides", "Either way marks read"),
+            )
+            tile("Swipe to mark read", sides.first { it.value == s.digestSwipe }.label, Icons.Rounded.DoneAll, onClick = launch {
+                pickOption(sides, s.digestSwipe)?.let(ctrl::setDigestSwipe)
+            })
+            switch(
+                "Show read posts", "Keep posts you've read in the digest, dimmed",
+                Icons.Outlined.Visibility, s.digestShowRead, ctrl::setDigestShowRead,
+            )
+            // Never on by itself, even with a key set for summaries (owner's rule).
+            switch(
+                "Use AI",
+                if (aiKeySet) "Your AI key picks and explains the posts. Sends titles, the start of text posts, their numbers and your top interests to your AI provider"
+                else "Needs an AI key: Settings › AI summaries",
+                Icons.Outlined.AutoAwesome, s.digestAi && aiKeySet, if (aiKeySet || s.digestAi) ctrl::setDigestAi else null,
+            )
+            if (s.digestAi && aiKeySet) {
+                val builds = listOf(
+                    PickOption(1, "The day's first build", "And Rebuild. Refreshes go by the numbers, so they're quick"),
+                    PickOption(0, "Every build", "Refreshes ask the AI about the new posts too (slower)"),
+                )
+                tile("Use AI for", builds.first { it.value == s.digestAiBuilds }.label, Icons.Outlined.Schedule, onClick = launch {
+                    pickOption(builds, s.digestAiBuilds)?.let(ctrl::setDigestAiBuilds)
+                })
+                switch(
+                    "AI picks the posts", "Off: the numbers pick, and the AI only writes",
+                    Icons.Outlined.AutoAwesome, s.digestAiPick, ctrl::setDigestAiPick,
+                )
+                switch(
+                    "AI explains each post", "Off: the line under a post is the numbers (\"3× a typical post\")",
+                    Icons.AutoMirrored.Rounded.Notes, s.digestAiWhy, ctrl::setDigestAiWhy,
+                )
+                switch(
+                    "Overview: Today in your communities", "A few sentences on what stood out today, on top of the digest",
+                    Icons.AutoMirrored.Rounded.Notes, s.digestOverview, ctrl::setDigestOverview,
+                )
+                // Its own, or as AI summaries'.
+                val sameAsSummaries = "\u0000"
+                val langs = listOf(PickOption(sameAsSummaries, "Same as AI summaries")) + SUMMARY_LANGUAGES.map { PickOption(it.first, it.second) }
+                val current = s.digestLanguage ?: sameAsSummaries
+                tile("Digest language", langs.firstOrNull { it.value == current }?.label ?: current, Icons.Outlined.Translate, onClick = launch {
+                    pickOption(langs, current)?.let { ctrl.setDigestLanguage(it.takeIf { v -> v != sameAsSummaries }) }
+                })
+            }
+            switch(
+                "Daily notification", "Builds your digest at the time below and tells you it's ready",
+                Icons.Outlined.Notifications, s.digestNotify,
+            ) { on -> scope.launch { setDigestNotify(on) } }
+            if (s.digestNotify) {
+                tile("Time", DigestNotifications.timeLabel(context, s.digestTime), Icons.Outlined.Schedule, onClick = launch { pickDigestTime() })
+            }
+            val orders = DigestOrder.entries.filter { it != DigestOrder.AI || s.digestAi }
+            val order = DigestOrder.of(s.digestOrder).let { if (it in orders) it else DigestOrder.NOTABLE }
+            tile("Order by", order.label, Icons.AutoMirrored.Rounded.Sort, onClick = launch {
+                pickOption(orders.map { PickOption(it.ordinal, it.label, it.description) }, order.ordinal)?.let(ctrl::setDigestOrder)
+            })
+        }
+        divider("digest")
+
         // ---------------------------------------------------------------- Appearance
         section("Appearance")
         // Light / dark, AMOLED, wallpaper colours, the accent and the palette style: one page (#114).
         add(Entry("t:Theme & colours", "Theme & colours ${themeSummary(s)} dark light AMOLED black accent color colour wallpaper dynamic palette style hex") {
-            SettingTile("Theme & colours", themeSummary(s), Icons.Rounded.Palette, onClick = { nav.push(Route.ThemeColors) })
+            SettingTile("Theme & colours", themeSummary(s), Icons.Outlined.FormatPaint, onClick = { nav.push(Route.ThemeColors) })
         })
         tile("App font", s.appFont.label, Icons.Rounded.FontDownload, onClick = launch {
             pickOption(AppFont.entries.map { PickOption(it, it.label, subtitle = it.description) }, s.appFont)?.let(ctrl::setAppFont)
@@ -564,6 +714,24 @@ fun SettingsList(
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
             )
         })
+        // #234: titles, post text and comments each on top of the app's size.
+        add(Entry("t:Post titles size", "Post titles text size font bigger smaller") {
+            TextScaleRow("Post titles", s.titleTextScale, ctrl::setTitleTextScale)
+        })
+        add(Entry("t:Post text size", "Post text body description text size font bigger smaller") {
+            TextScaleRow("Post text", s.postTextScale, ctrl::setPostTextScale)
+        })
+        add(Entry("t:Comments size", "Comments text size font bigger smaller") {
+            TextScaleRow("Comments", s.commentTextScale, ctrl::setCommentTextScale)
+        })
+        val defaultSizes = s.textScale == 1.0 && s.titleTextScale == 1.0 && s.postTextScale == 1.0 && s.commentTextScale == 1.0
+        tile(
+            "Reset text sizes",
+            if (defaultSizes) "All at their normal size" else "The app's, titles', post text's and comments' back to normal",
+            Icons.Rounded.RestartAlt,
+            enabled = !defaultSizes,
+            onClick = ctrl::resetTextScales,
+        )
         divider("appearance-nav")
         tile("Top bar", s.topBarMode.label, Icons.Rounded.ViewHeadline, onClick = launch {
             pickOption(TopBarMode.entries.map { PickOption(it, it.label, it.description) }, s.topBarMode)
@@ -624,6 +792,10 @@ fun SettingsList(
             s.exploreSections.filter { it.shown }.joinToString { it.section.label },
             Icons.Rounded.Explore,
             onClick = ::showExploreSections,
+        )
+        switch(
+            "Inbox in Profile", "An envelope at the top of Profile opens Inbox, instead of Inbox being a tab",
+            Icons.Rounded.MailOutline, s.inboxInProfile, ctrl::setInboxInProfile,
         )
         if (s.navStyle != 1) {
             switch(
@@ -707,7 +879,7 @@ fun SettingsList(
         // Collapsing AutoModerator and pinned bots (#202): here only, with the other collapse
         // options (it was also in Content filters, which read as a second, different switch).
         switch(
-            "Collapse AutoModerator and bots", "Start AutoModerator's comments, and pinned comments by bots, collapsed",
+            "Collapse AutoModerator and pinned comments", "Start AutoModerator's comments, and every pinned comment (bots', mods' notes), collapsed",
             Icons.Outlined.SmartToy, filters.collapseAutoMod, app.contentFilters::setCollapseAutoMod,
         )
         switch(
@@ -1601,3 +1773,18 @@ private fun ForYouMixSlider(value: Int, onChange: (Int) -> Unit) {
 private val TRANSLATE_LANGUAGES = listOf(
     "ar", "de", "en", "es", "fr", "he", "hi", "id", "it", "ja", "ko", "nl", "pl", "pt", "ru", "th", "tr", "uk", "vi", "zh",
 )
+
+/** One of #234's text sizes: its name and percentage over a slider, 80% to 160%, in 5% steps. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TextScaleRow(label: String, value: Double, onChange: (Double) -> Unit) {
+    val state = remember { SliderState(value.toFloat(), 15, 0.8f..1.6f) }
+    LaunchedEffect(value) { state.value = value.toFloat() }
+    Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            Text("${(value * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Slider(state = state, onValueChange = { onChange((it * 20).roundToInt() / 20.0) })
+    }
+}

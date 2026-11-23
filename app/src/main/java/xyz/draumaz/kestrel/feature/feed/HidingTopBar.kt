@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.activity.compose.BackHandler
@@ -120,6 +122,16 @@ class HidingBar(private val listState: LazyListState, private val scope: Corouti
 fun rememberHidingBar(listState: LazyListState): HidingBar {
     val scope = rememberCoroutineScope()
     val bar = remember(listState) { HidingBar(listState, scope) }
+    // Hidden or not is saved with the screen: Back from a post rebuilds it, and the bar
+    // came back out over a feed still scrolled down (#238). Applied once its height is known.
+    var hidden by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(bar) {
+        if (hidden) {
+            val h = snapshotFlow { bar.height }.first { it > 0 }
+            bar.shift = -h.toFloat()
+        }
+        snapshotFlow { bar.height > 0 && bar.shift <= -bar.height }.collect { hidden = it }
+    }
     // Never hidden past the feed's top, however it got there (a re-tap on the
     // tab, Back, new posts): there'd be a blank gap above the first card.
     LaunchedEffect(bar) {
@@ -138,11 +150,20 @@ fun rememberHidingBar(listState: LazyListState): HidingBar {
 fun HidingTopBar(bar: HidingBar, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val fade = cs.surface
+    // Long and gradual, as Google Discover's (#226): the status bar's icons stay readable
+    // and the fade has no visible edge.
     Box(
         Modifier
             .fillMaxWidth()
-            .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 16.dp)
-            .background(Brush.verticalGradient(listOf(fade.copy(alpha = 0.7f), fade.copy(alpha = 0f)))),
+            .height(WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 40.dp)
+            .background(
+                Brush.verticalGradient(
+                    0f to fade.copy(alpha = 0.85f),
+                    0.35f to fade.copy(alpha = 0.6f),
+                    0.7f to fade.copy(alpha = 0.2f),
+                    1f to fade.copy(alpha = 0f),
+                ),
+            ),
     )
     Box(
         Modifier

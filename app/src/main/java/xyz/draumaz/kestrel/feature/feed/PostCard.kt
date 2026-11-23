@@ -1,5 +1,7 @@
 package xyz.draumaz.kestrel.feature.feed
 
+import xyz.draumaz.kestrel.ui.theme.ScaledText
+import xyz.draumaz.kestrel.ui.theme.TextKind
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.graphics.RectangleShape
@@ -495,11 +497,11 @@ private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow:
         Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 6.dp)) {
             Header(p, a, s)
             Spacer(Modifier.height(10.dp))
-            Text(
+            ScaledText(TextKind.TITLE) { Text(
                 p.title,
                 Modifier.readDim(),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, lineHeight = TitleLineHeight),
-            )
+            ) }
             p.linkFlair?.let {
                 Spacer(Modifier.height(8.dp))
                 Flair(it)
@@ -511,14 +513,14 @@ private fun LargeCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow:
             PollOptions(p)
             if (p.snippet.isNotEmpty()) SpoilerOr(p) {
                 Spacer(Modifier.height(4.dp))
-                Text(
+                ScaledText(TextKind.POST_TEXT) { Text(
                     p.snippet,
                     Modifier.readDim(),
                         maxLines = s.textLines(3),
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
-                )
+                ) }
             }
             ActionsRow(p, a)
         }
@@ -536,11 +538,11 @@ private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow:
         Column(Modifier.padding(start = 16.dp, top = 14.dp, end = 8.dp, bottom = 6.dp)) {
             Header(p, a, s)
             Spacer(Modifier.height(10.dp))
-            Text(
+            ScaledText(TextKind.TITLE) { Text(
                 p.title,
                 Modifier.readDim(),
                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, lineHeight = TitleLineHeight),
-            )
+            ) }
             p.linkFlair?.let {
                 Spacer(Modifier.height(8.dp))
                 Flair(it)
@@ -552,14 +554,14 @@ private fun CardsCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow:
             PollOptions(p)
             if (p.snippet.isNotEmpty()) SpoilerOr(p) {
                 Spacer(Modifier.height(4.dp))
-                Text(
+                ScaledText(TextKind.POST_TEXT) { Text(
                     p.snippet,
                     Modifier.readDim(),
                         maxLines = s.textLines(2),
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodyMedium,
                     color = cs.onSurfaceVariant,
-                )
+                ) }
             }
             ActionsRow(p, a)
         }
@@ -575,13 +577,13 @@ private fun MiniCard(p: Post, a: PostActions, s: Settings, dim: Modifier, glow: 
             Spacer(Modifier.height(8.dp))
             Row {
                 Column(Modifier.weight(1f)) {
-                    Text(
+                    ScaledText(TextKind.TITLE) { Text(
                         p.title,
                         Modifier.readDim(),
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold, lineHeight = TitleLineHeight),
-                    )
+                    ) }
                     p.linkFlair?.let {
                         Spacer(Modifier.height(6.dp))
                         Flair(it)
@@ -897,7 +899,8 @@ fun PollOptions(p: Post) {
                 app.post.pollVoteOpened = p.id
                 nav.push(Route.RedditWeb("https://www.reddit.com${p.permalink}", "Vote in poll"))
             }) { Text("Vote on Reddit") }
-            else -> Text("Vote in the official app", fontSize = 12.sp, color = cs.onSurfaceVariant)
+            // Reddit's API can't vote in polls: its site can (#222).
+            else -> TextButton(onClick = { nav.openInBrowser("https://www.reddit.com${p.permalink}") }) { Text("Vote on reddit.com") }
         }
     }
 }
@@ -1291,7 +1294,7 @@ private fun Settings.textLines(own: Int) = if (postTextLines > 0) postTextLines 
 private fun CalmBody(p: Post, a: PostActions, s: Settings, mediaShape: androidx.compose.ui.graphics.Shape?) {
     val cs = MaterialTheme.colorScheme
     CalmHeader(p, a, s)
-    Text(
+    ScaledText(TextKind.TITLE) { Text(
         p.title,
         Modifier.padding(top = 10.dp).readDim(),
         fontSize = 18.sp,
@@ -1299,7 +1302,7 @@ private fun CalmBody(p: Post, a: PostActions, s: Settings, mediaShape: androidx.
         lineHeight = 1.3.em,
         letterSpacing = (-0.1).sp,
         color = cs.onSurface,
-    )
+    ) }
     p.linkFlair?.let { CalmFlair(it, Modifier.padding(top = 8.dp)) }
     CrosspostLine(p)
     ReminderLine(p)
@@ -1309,14 +1312,14 @@ private fun CalmBody(p: Post, a: PostActions, s: Settings, mediaShape: androidx.
         PollOptions(p)
     }
     if (p.snippet.isNotEmpty()) SpoilerOr(p) {
-        Text(
+        ScaledText(TextKind.POST_TEXT) { Text(
             p.snippet,
             Modifier.padding(top = 6.dp).readDim(),
             maxLines = s.textLines(2),
             overflow = TextOverflow.Ellipsis,
             fontSize = 14.sp,
             color = cs.onSurfaceVariant,
-        )
+        ) }
     }
 }
 

@@ -73,6 +73,10 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import xyz.draumaz.kestrel.feature.digest.DigestView
+import xyz.draumaz.kestrel.feature.digest.digestRows
+import xyz.draumaz.kestrel.feature.digest.rememberDigestUnread
+import xyz.draumaz.kestrel.feature.digest.rememberDigestView
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -191,6 +195,10 @@ fun PostListView(
     val deckMode = engines && (homeMode || settings.forYouFeed)
     // The loading deck was just showing: deal the first cards in.
     var dealHome by remember { mutableStateOf(false) }
+    // The Digest's chip (Settings › Digest › Show Digest in › Posts chip): the digest in place of the feed.
+    val digestChip = engines && postsTab && settings.digestEnabled && settings.digestPlace == 0 && app.session.session?.anonymous == false
+    val showDigest = digestChip && app.digest.onPosts.collectAsStateWithLifecycle().value
+    var digestView: DigestView? = null
     val chipsState = rememberLazyListState()
     val floatingChipsState = rememberLazyListState()
     val chipsIn: @Composable (LazyListState, Float) -> Unit = { state, outline ->
@@ -207,6 +215,8 @@ fun PostListView(
             onRedditHome = if (settings.redditHomeAllowed) controller::selectRedditHome else null,
             blend = settings.forYouFeed && settings.blendHome && settings.redditHomeAllowed && engines,
             onBlend = if (settings.redditHomeAllowed) controller::selectBlend else null,
+            digest = showDigest,
+            onDigest = if (digestChip) ({ on: Boolean -> app.digest.onPosts.value = on }) else null,
         )
     }
     // Under a fixed top bar (subreddits, custom feeds, #86) the floating row
@@ -269,7 +279,7 @@ fun PostListView(
             if (row == null || row.size == 0 || by == null) 1f else (by.toFloat() / row.size).coerceIn(0f, 1f)
         }
     }
-    val isData = ui is FeedUi.Data
+    val isData = ui is FeedUi.Data || showDigest
     LaunchedEffect(past, floating) {
         if (!floating) return@LaunchedEffect
         val (from, to) = if (past) chipsState to floatingChipsState else floatingChipsState to chipsState
@@ -284,6 +294,11 @@ fun PostListView(
     }
 
     fun refresh(haptic: Boolean = true) {
+        digestView?.let {
+            if (haptic) Haptics.medium(view)
+            it.refresh(manual = true)
+            return
+        }
         if (refreshing) return
         if (haptic) Haptics.medium(view)
         scope.launch {
@@ -332,6 +347,13 @@ fun PostListView(
     // A sort / feed change replaces the list: start the new one at the top.
     val isLoading = ui is FeedUi.Loading
     LaunchedEffect(isLoading) { if (isLoading) listState.scrollToItem(0) }
+    // So does the Digest chip, either way (not on first showing: the list keeps its place).
+    var digestShown by remember { mutableStateOf(showDigest) }
+    LaunchedEffect(showDigest) {
+        if (showDigest != digestShown) listState.scrollToItem(0)
+        digestShown = showDigest
+    }
+    if (showDigest) digestView = rememberDigestView()
 
     if (postsTab) {
         // Posts tab only: respond to the "tap active tab" signal — scroll to
@@ -369,12 +391,19 @@ fun PostListView(
 
     Box(modifier.fillMaxSize().then(if (ownFloat) Modifier.nestedScroll(chipsScroll) else Modifier)) {
         RefreshBox(
-            isRefreshing = refreshing,
+            isRefreshing = digestView?.refreshing ?: refreshing,
             onRefresh = { refresh() },
             modifier = Modifier.fillMaxSize(),
             indicatorPadding = topPadding,
         ) {
-            when (val u = ui) {
+            val dv = digestView
+            if (dv != null) {
+                LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = listPadding, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (header != null) item(key = "header", contentType = "header") { header() }
+                    item(key = "sortbar", contentType = "sortbar") { chips() }
+                    digestRows(dv)
+                }
+            } else when (val u = ui) {
                 FeedUi.Loading -> {
                     // Home (no saved page to show yet): the shuffling deck with a
                     // live count of posts found; its cards are then dealt in.
@@ -453,7 +482,7 @@ fun PostListView(
                 // On the solid background the chips need no outline to stand out (#132).
             ) { chipsIn(floatingChipsState, if (settings.floatingChipsSolid) 0f else floatingOutline) }
         }
-        val pending = (ui as? FeedUi.Data)?.state?.hasPending == true
+        val pending = !showDigest && (ui as? FeedUi.Data)?.state?.hasPending == true
         if (pending) {
             NewPostsPill(
                 Modifier.align(Alignment.TopCenter).padding(top = 8.dp + topPadding),
@@ -508,7 +537,9 @@ private fun FeedList(
     val decodeWidth = feedDecodeWidth()
     val prefetched = remember { HashSet<String>() }
     val latestPosts by rememberUpdatedState(posts)
-    val headerCount = if (header != null) 2 else 1 // header + sort bar
+    // Posts only: the one-time Digest offer under the chips.
+    val offer = postsTab && xyz.draumaz.kestrel.feature.digest.rememberDigestOffer()
+    val headerCount = (if (header != null) 2 else 1) + (if (offer) 1 else 0) // header + sort bar (+ the offer)
     // Back from Browse media (#103): the post it was on comes to the top.
     val firstPostRow by rememberUpdatedState(headerCount + if (homeStatus is HomeStatus.Saved || homeStatus is HomeStatus.FellBack) 1 else 0)
     LaunchedEffect(controller) {
@@ -569,6 +600,7 @@ private fun FeedList(
     ) {
         if (header != null) item(key = "header", contentType = "header") { header() }
         item(key = "sortbar", contentType = "sortbar") { chips() }
+        if (offer) item(key = "digest_offer", contentType = "digest_offer") { xyz.draumaz.kestrel.feature.digest.DigestOfferCard() }
         // Not your live Home: say what this is instead (until the next load works).
         if (homeStatus is HomeStatus.Saved || homeStatus is HomeStatus.FellBack) {
             item(key = "homestatus", contentType = "homestatus") { HomeStatusStrip(homeStatus, onRetry) }
@@ -753,6 +785,7 @@ private fun iconFor(t: TopTime): ImageVector = when (t) {
 }
 
 private sealed interface FeedChoice {
+    data object Digest : FeedChoice
     data object ForYou : FeedChoice
     data object Blend : FeedChoice
     data object Home : FeedChoice
@@ -780,14 +813,19 @@ private fun FeedChips(
     onRedditHome: (() -> Unit)?, // null unless enabled in Settings
     blend: Boolean,
     onBlend: (() -> Unit)?, // null unless Reddit Home is enabled
+    digest: Boolean = false, // the Digest is showing in place of the feed
+    onDigest: ((Boolean) -> Unit)? = null, // null without the Digest chip
 ) {
     val scope = rememberCoroutineScope()
-    val current = when {
+    // The feed under the Digest, when that's showing.
+    val feed = when {
         redditHome -> FeedChoice.Home
         blend -> FeedChoice.Blend
         forYou -> FeedChoice.ForYou
         else -> FeedChoice.Sort(sort)
     }
+    val current = if (digest) FeedChoice.Digest else feed
+    val digestUnread = if (onDigest != null) rememberDigestUnread() else 0
     var picked by remember { mutableStateOf<FeedChoice?>(null) }
     var pickedTime by remember { mutableStateOf<TopTime?>(null) }
 
@@ -802,12 +840,25 @@ private fun FeedChips(
         }
     }
 
+    // Away from the Digest: back to the feed under it, or to another one.
+    fun pick(chip: FeedChoice, topTime: TopTime? = null, changed: Boolean, action: () -> Unit) {
+        if (changed) {
+            choose(chip, topTime) {
+                if (digest) onDigest?.invoke(false)
+                action()
+            }
+        } else if (digest) {
+            choose(chip, topTime) { onDigest?.invoke(false) }
+        }
+    }
+
     val shown = picked ?: current
     val chips = buildList {
         if (isFrontpage) {
             add(FeedChoice.ForYou)
             if (onBlend != null) add(FeedChoice.Blend)
             if (onRedditHome != null) add(FeedChoice.Home)
+            if (onDigest != null) add(FeedChoice.Digest)
         }
         addAll(PostSort.entries.map { FeedChoice.Sort(it) })
     }
@@ -831,22 +882,24 @@ private fun FeedChips(
                 FeedChoice.ForYou -> "For You"
                 FeedChoice.Blend -> "Blend · Beta"
                 FeedChoice.Home -> "Home"
+                FeedChoice.Digest -> if (digestUnread > 0) "Digest · $digestUnread" else "Digest"
                 is FeedChoice.Sort ->
                     if (chip.sort.needsTime && chip == shown) "${chip.sort.label} · ${(pickedTime ?: time).label}" else chip.sort.label
             }
             FeedChip(label, chip == shown, outline) {
                 if (picked != null) return@FeedChip
                 when (chip) {
-                    FeedChoice.ForYou -> if (chip != current) choose(chip, action = onForYou)
-                    FeedChoice.Blend -> if (chip != current) choose(chip) { onBlend?.invoke() }
-                    FeedChoice.Home -> if (chip != current) choose(chip) { onRedditHome?.invoke() }
+                    FeedChoice.Digest -> if (!digest) choose(chip) { onDigest?.invoke(true) }
+                    FeedChoice.ForYou -> pick(chip, changed = chip != feed, action = onForYou)
+                    FeedChoice.Blend -> pick(chip, changed = chip != feed) { onBlend?.invoke() }
+                    FeedChoice.Home -> pick(chip, changed = chip != feed) { onRedditHome?.invoke() }
                     is FeedChoice.Sort -> if (chip.sort.needsTime) {
                         scope.launch {
                             val t = pickTopTime(time) ?: return@launch
-                            if (chip != current || t != time) choose(chip, t) { onPick(chip.sort, t) }
+                            pick(chip, t, changed = chip != feed || t != time) { onPick(chip.sort, t) }
                         }
-                    } else if (chip != current) {
-                        choose(chip) { onPick(chip.sort, null) }
+                    } else {
+                        pick(chip, changed = chip != feed) { onPick(chip.sort, null) }
                     }
                 }
             }
